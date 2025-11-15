@@ -136,17 +136,27 @@ const App: React.FC = () => {
     return parseFloat(mass.toFixed(3));
   }, []);
 
+  const buildSimulationPayload = useCallback(
+    (planetsOverride?: BodyTemplate[]) => {
+      const clonePlanets = (planetsOverride ?? system.planets).map((p) => ({ ...p }));
+      return {
+        star: { ...system.star },
+        planets: clonePlanets,
+        durationSec: system.durationSec,
+        dtSec: system.dtSec,
+        musicMode: system.musicMode,
+      };
+    },
+    [system]
+  );
+
   const fetchTrajectoryPreview = useCallback(
     async (planet: BodyTemplate) => {
       const requestId = ++previewRequestRef.current;
       setPredicting(true);
       setTrajectory(null);
       try {
-        const payload = {
-          ...system,
-          planets: [...system.planets, planet],
-          durationSec: Math.min(system.durationSec, 120),
-        };
+        const payload = buildSimulationPayload([...system.planets, planet]);
         const res = await fetch(`${API}/compute`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -177,7 +187,7 @@ const App: React.FC = () => {
         }
       }
     },
-    [system]
+    [system, buildSimulationPayload]
   );
 
   useEffect(() => {
@@ -233,10 +243,11 @@ const App: React.FC = () => {
     setPlayhead(0);
 
     try {
+      const payload = buildSimulationPayload();
       const res = await fetch(`${API}/compute`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(system),
+        body: JSON.stringify(payload),
       });
 
       if (!res.ok) {
@@ -257,7 +268,7 @@ const App: React.FC = () => {
     } finally {
       setIsComputing(false);
     }
-  }, [system, isComputing]);
+  }, [system.planets.length, isComputing, buildSimulationPayload, system.durationSec, system.dtSec]);
 
   const handlePause = useCallback(() => {
     setPlaying(false);
@@ -573,7 +584,6 @@ const App: React.FC = () => {
           onMouseUp={handleCanvasMouseUp}
           onMouseLeave={handleCanvasMouseLeave}
         >
-          <circle cx={250} cy={250} r={10} fill="yellow" />
           {trajectory?.points?.length ? (
             <polyline
               points={trajectory.points

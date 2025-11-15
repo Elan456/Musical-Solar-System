@@ -37,9 +37,9 @@ def _build_initial_bodies(system_cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
             "velocity": [0.0, 0.0, 0.0],
             "metadata": {
                 "kind": "star",
-                "color": "#ffffcc",
+                "color": "#ffff00",
                 "radius": 12,
-                "visible": False,
+                "visible": True,
             },
         }
     ]
