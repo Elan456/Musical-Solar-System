@@ -6,13 +6,14 @@ Minimal mono-repo for a musical orrery. Backend computes planet positions and mu
 
 ```sh
 # Backend
-cd backend
-python -m uvicorn main:app --reload
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .
+make backend
 
 # Frontend
-cd frontend
 pnpm install
-pnpm dev
+make frontend
 ```
 
 Open [http://localhost:5173](http://localhost:5173) and click "Compute" to see the orrery and play music.
