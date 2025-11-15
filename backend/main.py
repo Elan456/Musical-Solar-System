@@ -26,6 +26,8 @@ class Planet(BaseModel):
     mass: float
     color: str
     radius: float
+    position: Optional[List[float]] = None
+    velocity: Optional[List[float]] = None
 
 
 class ComputeRequest(BaseModel):
@@ -76,7 +78,6 @@ PRESET = {
 
 @app.post("/api/compute", response_model=ComputeResponse)
 def compute(req: ComputeRequest):
-    print("Compute request is:", req)
     payload = req.dict()
     samples = samples_for_system(payload, req.durationSec, req.dtSec)
     events = events_for_system(payload, req.durationSec, req.musicMode)

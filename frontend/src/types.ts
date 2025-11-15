@@ -5,6 +5,8 @@ export type BodyTemplate = {
   mass: number;
   color: string;
   radius: number;
+  position?: [number, number, number];
+  velocity?: [number, number, number];
 };
 
 export type SystemPreset = {
@@ -24,6 +26,8 @@ export type Planet = {
   radius?: number;
   x: number;
   y: number;
+  position?: [number, number, number];
+  velocity?: [number, number, number];
 };
 
 export type Sample = {

@@ -20,6 +20,13 @@ def period_days(aAU: float) -> float:
     return 365.25 * aAU ** 1.5
 
 
+def _vector3(values: Any) -> List[float]:
+    vec = list(values)
+    if len(vec) < 3:
+        vec.extend([0.0] * (3 - len(vec)))
+    return [float(v) for v in vec[:3]]
+
+
 def _build_initial_bodies(system_cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
     star_mass = system_cfg["star"]["massMs"] * STAR_MASS_SCALE
     bodies: List[Dict[str, Any]] = [
@@ -39,15 +46,31 @@ def _build_initial_bodies(system_cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
 
     for planet in system_cfg["planets"]:
         distance = planet["aAU"]
-        speed = 0.0
-        if distance > 0:
-            speed = math.sqrt(SIM_G * star_mass / distance)
+        position = planet.get("position")
+        velocity = planet.get("velocity")
+
+        if position is not None:
+            position_vec = _vector3(position)
+        else:
+            position_vec = [distance, 0.0, 0.0]
+
+        if velocity is not None:
+            velocity_vec = _vector3(velocity)
+        else:
+            dist_xy = math.hypot(position_vec[0], position_vec[1])
+            if dist_xy > 0:
+                speed = math.sqrt(SIM_G * star_mass / dist_xy)
+                direction = [-position_vec[1] / dist_xy, position_vec[0] / dist_xy, 0.0]
+                velocity_vec = [direction[0] * speed, direction[1] * speed, 0.0]
+            else:
+                velocity_vec = [0.0, 0.0, 0.0]
+
         bodies.append(
             {
                 "name": planet["name"],
                 "mass": planet["mass"],
-                "position": [distance, 0.0, 0.0],
-                "velocity": [0.0, speed, 0.0],
+                "position": position_vec,
+                "velocity": velocity_vec,
                 "metadata": {**planet, "visible": True},
             }
         )
