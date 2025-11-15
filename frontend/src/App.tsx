@@ -5,7 +5,13 @@ import React, {
   useCallback,
   useMemo,
 } from "react";
-import { SystemPreset, ComputeResponse, Planet, BodyTemplate } from "./types";
+import {
+  SystemPreset,
+  ComputeResponse,
+  Planet,
+  BodyTemplate,
+  CustomBodyConfig,
+} from "./types";
 import { stopAll } from "./audio";
 import CustomBodyPanel from "./components/CustomBodyPanel";
 
@@ -34,11 +40,8 @@ const App: React.FC = () => {
   const [playhead, setPlayhead] = useState(0);
   const [isComputing, setIsComputing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [customBody, setCustomBody] = useState<BodyTemplate>({
-    name: "Custom",
+  const [customBody, setCustomBody] = useState<CustomBodyConfig>({
     kind: "rocky",
-    aAU: 1.0,
-    mass: 0.5,
     color: "#ffffff",
     radius: 6,
   });
@@ -49,17 +52,21 @@ const App: React.FC = () => {
     points: { x: number; y: number }[];
   } | null>(null);
   const [predicting, setPredicting] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
 
   const rafRef = useRef<number | null>(null);
   const playStartRef = useRef<number | null>(null);
+  const previewRequestRef = useRef(0);
+  const previewDebounceRef = useRef<number | null>(null);
 
   const hasSimData =
     !!data && Array.isArray((data as any).samples) && (data as any).samples.length > 0;
 
   const makeUniqueName = useCallback(
-    (base: string) => {
+    (base: string, existingList?: BodyTemplate[]) => {
       const sanitized = base.trim() || "Planet";
-      const existing = new Set(system.planets.map((p) => p.name));
+      const source = existingList ?? system.planets;
+      const existing = new Set(source.map((p) => p.name));
       if (!existing.has(sanitized)) return sanitized;
       let idx = 2;
       let candidate = `${sanitized} ${idx}`;
@@ -90,6 +97,13 @@ const App: React.FC = () => {
   const clearPreview = useCallback(() => {
     setPendingPlanet(null);
     setTrajectory(null);
+    setIsDragging(false);
+    previewRequestRef.current += 1;
+    setPredicting(false);
+    if (previewDebounceRef.current) {
+      window.clearTimeout(previewDebounceRef.current);
+      previewDebounceRef.current = null;
+    }
   }, []);
 
   const handlePlacementToggle = useCallback(() => {
@@ -106,15 +120,25 @@ const App: React.FC = () => {
       ...prev,
       planets: [
         ...prev.planets,
-        { ...pendingPlanet, name: makeUniqueName(pendingPlanet.name) },
+        {
+          ...pendingPlanet,
+          name: makeUniqueName(pendingPlanet.name, prev.planets),
+        },
       ],
     }));
     clearPreview();
     setPlacementMode(false);
   }, [pendingPlanet, clearPreview, makeUniqueName]);
 
+  const computeMassFromConfig = useCallback((cfg: CustomBodyConfig) => {
+    const base = Math.max(cfg.radius, 1);
+    const mass = cfg.kind === "gas" ? base * 0.6 : base * 0.3;
+    return parseFloat(mass.toFixed(3));
+  }, []);
+
   const fetchTrajectoryPreview = useCallback(
     async (planet: BodyTemplate) => {
+      const requestId = ++previewRequestRef.current;
       setPredicting(true);
       setTrajectory(null);
       try {
@@ -139,16 +163,64 @@ const App: React.FC = () => {
             )
             .filter(Boolean)
             .map((p: Planet) => ({ x: p.x, y: p.y })) ?? [];
-        setTrajectory({ planetName: planet.name, points });
+        if (previewRequestRef.current === requestId) {
+          setTrajectory({ planetName: planet.name, points });
+        }
       } catch (err) {
         console.error("Failed to predict trajectory", err);
-        setTrajectory(null);
+        if (previewRequestRef.current === requestId) {
+          setTrajectory(null);
+        }
       } finally {
-        setPredicting(false);
+        if (previewRequestRef.current === requestId) {
+          setPredicting(false);
+        }
       }
     },
     [system]
   );
+
+  useEffect(() => {
+    if (!pendingPlanet) return;
+    if (previewDebounceRef.current) {
+      window.clearTimeout(previewDebounceRef.current);
+      previewDebounceRef.current = null;
+    }
+    const handle = window.setTimeout(() => {
+      fetchTrajectoryPreview(pendingPlanet);
+      previewDebounceRef.current = null;
+    }, 200);
+    previewDebounceRef.current = handle;
+    return () => {
+      if (previewDebounceRef.current) {
+        window.clearTimeout(previewDebounceRef.current);
+        previewDebounceRef.current = null;
+      }
+    };
+  }, [pendingPlanet, fetchTrajectoryPreview]);
+
+  useEffect(() => {
+    if (!pendingPlanet) return;
+    setPendingPlanet((prev) => {
+      if (!prev) return prev;
+      const mass = computeMassFromConfig(customBody);
+      if (
+        prev.kind === customBody.kind &&
+        prev.color === customBody.color &&
+        prev.radius === customBody.radius &&
+        prev.mass === mass
+      ) {
+        return prev;
+      }
+      return {
+        ...prev,
+        kind: customBody.kind,
+        color: customBody.color,
+        radius: customBody.radius,
+        mass,
+      };
+    });
+  }, [customBody, computeMassFromConfig]);
 
   const fetchCompute = useCallback(async () => {
     if (!system.planets.length || isComputing) return;
@@ -286,29 +358,75 @@ const App: React.FC = () => {
     });
   }, [currentSample, renderScale]);
 
-  const handleCanvasClick = useCallback(
+  const getSimCoords = useCallback(
     (evt: React.MouseEvent<SVGSVGElement, MouseEvent>) => {
-      if (!placementMode) return;
       const bounds = evt.currentTarget.getBoundingClientRect();
       const xPx = evt.clientX - bounds.left;
       const yPx = evt.clientY - bounds.top;
       const center = 250;
       const simX = (xPx - center) / renderScale;
       const simY = (yPx - center) / renderScale;
-      if (!Number.isFinite(simX) || !Number.isFinite(simY)) return;
-      const distance = Math.sqrt(simX * simX + simY * simY) || 0.1;
-      const name = makeUniqueName(customBody.name);
-      const placed: BodyTemplate = {
-        ...customBody,
-        name,
-        aAU: distance,
-        position: [simX, simY, 0],
-      };
-      setPendingPlanet(placed);
-      fetchTrajectoryPreview(placed);
+      if (!Number.isFinite(simX) || !Number.isFinite(simY)) {
+        return null;
+      }
+      return { simX, simY };
     },
-    [placementMode, renderScale, customBody, makeUniqueName, fetchTrajectoryPreview]
+    [renderScale]
   );
+
+  const updatePendingAt = useCallback(
+    (simX: number, simY: number) => {
+      const distance = Math.sqrt(simX * simX + simY * simY) || 0.1;
+      const baseName = customBody.kind === "gas" ? "Gas Giant" : "Rocky Body";
+      const mass = computeMassFromConfig(customBody);
+      setPendingPlanet((prev) => {
+        const name = prev?.name ?? makeUniqueName(baseName);
+        return {
+          name,
+          kind: customBody.kind,
+          color: customBody.color,
+          radius: customBody.radius,
+          mass,
+          aAU: distance,
+          position: [simX, simY, 0],
+        };
+      });
+    },
+    [customBody, computeMassFromConfig, makeUniqueName]
+  );
+
+  const handleCanvasMouseDown = useCallback(
+    (evt: React.MouseEvent<SVGSVGElement, MouseEvent>) => {
+      if (!placementMode) return;
+      const coords = getSimCoords(evt);
+      if (!coords) return;
+      updatePendingAt(coords.simX, coords.simY);
+      setIsDragging(true);
+    },
+    [placementMode, getSimCoords, updatePendingAt]
+  );
+
+  const handleCanvasMouseMove = useCallback(
+    (evt: React.MouseEvent<SVGSVGElement, MouseEvent>) => {
+      if (!placementMode || !isDragging) return;
+      const coords = getSimCoords(evt);
+      if (!coords) return;
+      updatePendingAt(coords.simX, coords.simY);
+    },
+    [placementMode, isDragging, getSimCoords, updatePendingAt]
+  );
+
+  const handleCanvasMouseUp = useCallback(() => {
+    if (isDragging) {
+      setIsDragging(false);
+    }
+  }, [isDragging]);
+
+  const handleCanvasMouseLeave = useCallback(() => {
+    if (isDragging) {
+      setIsDragging(false);
+    }
+  }, [isDragging]);
 
   const canPlay = !!data && !!playbackConfig && hasSimData && !isComputing;
   const canPause = playing;
@@ -328,7 +446,7 @@ const App: React.FC = () => {
         <h2>Custom Bodies</h2>
         <p>
           Design every object yourself. Use the custom body controls below to choose
-          physical traits, start placement, then click on the simulation to preview and
+          physical traits, start placement, then click and drag on the simulation to preview and
           add it to the system.
         </p>
 
@@ -450,7 +568,10 @@ const App: React.FC = () => {
           width="500"
           height="500"
           style={{ background: "#222", cursor: placementMode ? "crosshair" : "default" }}
-          onClick={handleCanvasClick}
+          onMouseDown={handleCanvasMouseDown}
+          onMouseMove={handleCanvasMouseMove}
+          onMouseUp={handleCanvasMouseUp}
+          onMouseLeave={handleCanvasMouseLeave}
         >
           <circle cx={250} cy={250} r={10} fill="yellow" />
           {trajectory?.points?.length ? (

@@ -1,9 +1,9 @@
 import React from "react";
-import { BodyTemplate } from "../types";
+import { CustomBodyConfig } from "../types";
 
 type CustomBodyPanelProps = {
-  config: BodyTemplate;
-  onChange: (cfg: BodyTemplate) => void;
+  config: CustomBodyConfig;
+  onChange: (cfg: CustomBodyConfig) => void;
   placementActive: boolean;
   onPlacementToggle: () => void;
   canCommit: boolean;
@@ -32,7 +32,7 @@ export function CustomBodyPanel({
   onClear,
   predicting,
 }: CustomBodyPanelProps) {
-  const update = (key: keyof BodyTemplate, value: any) => {
+  const update = (key: keyof CustomBodyConfig, value: any) => {
     onChange({ ...config, [key]: value });
   };
 
@@ -48,24 +48,18 @@ export function CustomBodyPanel({
     >
       <h3>Custom Body</h3>
       <p style={{ fontSize: 12, color: "#aaa" }}>
-        Pick a color, radius, and low mass, then click "Start Placement" to drop it directly on the map.
+        Pick a type, color, and radius, then start placement to drop it onto the
+        map. Drag the preview directly in the simulation to refine its orbit before
+        committing it to the system.
       </p>
-      <label style={labelStyle}>
-        Name
-        <input
-          style={inputStyle}
-          type="text"
-          value={config.name}
-          onChange={(e) => update("name", e.target.value)}
-          placeholder="Custom"
-        />
-      </label>
       <label style={labelStyle}>
         Type
         <select
           style={inputStyle}
           value={config.kind}
-          onChange={(e) => update("kind", e.target.value as BodyTemplate["kind"])}
+          onChange={(e) =>
+            update("kind", e.target.value as CustomBodyConfig["kind"])
+          }
         >
           <option value="rocky">Rocky</option>
           <option value="gas">Gas</option>
@@ -91,21 +85,8 @@ export function CustomBodyPanel({
           onChange={(e) => update("radius", parseInt(e.target.value, 10))}
         />
       </label>
-      <label style={labelStyle}>
-        Mass (u)
-        <input
-          style={inputStyle}
-          type="range"
-          min={0.05}
-          max={5}
-          step={0.05}
-          value={config.mass}
-          onChange={(e) => update("mass", parseFloat(e.target.value))}
-        />
-        <div style={{ fontSize: 12, color: "#bbb" }}>{config.mass.toFixed(2)} u</div>
-      </label>
       <button onClick={onPlacementToggle} style={{ width: "100%", marginTop: 8 }}>
-        {placementActive ? "Placement Active: Click on Sim" : "Start Placement"}
+        {placementActive ? "Placement Active: Drag on Sim" : "Start Placement"}
       </button>
       {canCommit && (
         <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
@@ -119,7 +100,9 @@ export function CustomBodyPanel({
       )}
       {predicting && <p style={{ fontSize: 12, color: "#bbb", marginTop: 8 }}>Predicting trajectory…</p>}
       {!predicting && placementActive && !canCommit && (
-        <p style={{ fontSize: 12, color: "#bbb", marginTop: 8 }}>Click anywhere on the sim to preview the path.</p>
+        <p style={{ fontSize: 12, color: "#bbb", marginTop: 8 }}>
+          Click and drag anywhere on the sim to preview the path.
+        </p>
       )}
     </div>
   );

@@ -17,6 +17,8 @@ export type SystemPreset = {
   musicMode: "per_orbit_note" | "continuous_tone";
 };
 
+export type CustomBodyConfig = Pick<BodyTemplate, "kind" | "color" | "radius">;
+
 export type Planet = {
   name: string;
   kind: "rocky" | "gas";
