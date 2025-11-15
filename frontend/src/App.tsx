@@ -20,8 +20,8 @@ const API = "http://localhost:8000/api";
 const defaultPreset: SystemPreset = {
   star: { massMs: 1.0 },
   planets: [],
-  durationSec: 300,
-  dtSec: 0.1,
+  durationSec: 30,
+  dtSec: 0.016,
   musicMode: "per_orbit_note",
 };
 
@@ -58,6 +58,7 @@ const App: React.FC = () => {
   const playStartRef = useRef<number | null>(null);
   const previewRequestRef = useRef(0);
   const previewDebounceRef = useRef<number | null>(null);
+  const computeRequestRef = useRef(0);
 
   const hasSimData =
     !!data && Array.isArray((data as any).samples) && (data as any).samples.length > 0;
@@ -85,14 +86,6 @@ const App: React.FC = () => {
       planets: prev.planets.filter((_, i) => i !== index),
     }));
   }, []);
-
-  const handleSystemChange = useCallback(
-    (key: "durationSec" | "dtSec", value: number) => {
-      if (!Number.isFinite(value)) return;
-      setSystem((prev) => ({ ...prev, [key]: value }));
-    },
-    []
-  );
 
   const clearPreview = useCallback(() => {
     setPendingPlanet(null);
@@ -132,7 +125,7 @@ const App: React.FC = () => {
 
   const computeMassFromConfig = useCallback((cfg: CustomBodyConfig) => {
     const base = Math.max(cfg.radius, 1);
-    const mass = cfg.kind === "gas" ? base * 0.6 : base * 0.3;
+    const mass = cfg.kind === "gas" ? base * 0.006 : base * 0.003;
     return parseFloat(mass.toFixed(3));
   }, []);
 
@@ -147,7 +140,7 @@ const App: React.FC = () => {
         musicMode: system.musicMode,
       };
     },
-    [system]
+    [system.star, system.planets, system.durationSec, system.dtSec, system.musicMode]
   );
 
   const fetchTrajectoryPreview = useCallback(
@@ -232,43 +225,70 @@ const App: React.FC = () => {
     });
   }, [customBody, computeMassFromConfig]);
 
-  const fetchCompute = useCallback(async () => {
-    if (!system.planets.length || isComputing) return;
+  const runSimulation = useCallback(
+    async (payload: SystemPreset, requestId: number) => {
+      setIsComputing(true);
+      setError(null);
+      setPlaying(false);
+      stopAll();
+      playStartRef.current = null;
+      setPlayhead(0);
 
-    setIsComputing(true);
-    setError(null);
-    setPlaying(false);
-    stopAll();
-    playStartRef.current = null;
-    setPlayhead(0);
+      try {
+        const res = await fetch(`${API}/compute`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
 
-    try {
-      const payload = buildSimulationPayload();
-      const res = await fetch(`${API}/compute`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+        if (!res.ok) {
+          throw new Error(`Server responded with ${res.status}`);
+        }
 
-      if (!res.ok) {
-        throw new Error(`Server responded with ${res.status}`);
+        const json: ComputeResponse = await res.json();
+        if (requestId !== computeRequestRef.current) {
+          return;
+        }
+        setData(json);
+        setPlaybackConfig({
+          durationSec: payload.durationSec,
+          dtSec: payload.dtSec,
+        });
+      } catch (err: any) {
+        console.error(err);
+        if (requestId !== computeRequestRef.current) {
+          return;
+        }
+        setError(err?.message ?? "Failed to run simulation");
+        setData(null);
+        setPlaybackConfig(null);
+      } finally {
+        if (requestId === computeRequestRef.current) {
+          setIsComputing(false);
+        }
       }
+    },
+    [stopAll]
+  );
 
-      const json: ComputeResponse = await res.json();
-      setData(json);
-      setPlaybackConfig({
-        durationSec: system.durationSec,
-        dtSec: system.dtSec,
-      });
-    } catch (err: any) {
-      console.error(err);
-      setError(err?.message ?? "Failed to run simulation");
+  useEffect(() => {
+    if (!system.planets.length) {
+      computeRequestRef.current += 1;
       setData(null);
       setPlaybackConfig(null);
-    } finally {
+      setError(null);
       setIsComputing(false);
+      setPlaying(false);
+      stopAll();
+      playStartRef.current = null;
+      setPlayhead(0);
+      return;
     }
-  }, [system.planets.length, isComputing, buildSimulationPayload, system.durationSec, system.dtSec]);
+
+    const payload = buildSimulationPayload();
+    const requestId = ++computeRequestRef.current;
+    runSimulation(payload, requestId);
+  }, [system.planets, buildSimulationPayload, runSimulation, stopAll]);
 
   const handlePause = useCallback(() => {
     setPlaying(false);
@@ -505,57 +525,18 @@ const App: React.FC = () => {
           </div>
         ))}
 
-        <div style={{ marginTop: 24 }}>
-          <label style={{ display: "block", marginBottom: 8 }}>
-            Duration (seconds)
-            <input
-              type="number"
-              min={1}
-              value={system.durationSec}
-              onChange={(e) =>
-                handleSystemChange(
-                  "durationSec",
-                  parseFloat(e.target.value)
-                )
-              }
-              style={{ width: "100%", marginTop: 4 }}
-            />
-          </label>
-          <label style={{ display: "block", marginBottom: 16 }}>
-            Sample Rate (dt seconds)
-            <input
-              type="number"
-              min={0.01}
-              step={0.01}
-              value={system.dtSec}
-              onChange={(e) =>
-                handleSystemChange(
-                  "dtSec",
-                  parseFloat(e.target.value)
-                )
-              }
-              style={{ width: "100%", marginTop: 4 }}
-            />
-          </label>
-          <button
-            onClick={fetchCompute}
-            disabled={!system.planets.length || isComputing}
-          >
-            {isComputing ? "Simulating..." : "Simulate"}
-          </button>
+        <div style={{ marginTop: 24, fontSize: 12, color: "#aaa" }}>
+          <div>Simulation auto-updates (30s window, dt 0.016s).</div>
+          {isComputing && <div style={{ color: "#ddd", marginTop: 6 }}>Simulating latest changes…</div>}
+          {playbackConfig && !isComputing && (
+            <div style={{ marginTop: 6 }}>
+              Last simulation complete: duration {playbackConfig.durationSec}s, dt {playbackConfig.dtSec}s
+            </div>
+          )}
           {error && (
             <p style={{ color: "salmon", marginTop: 8 }}>{error}</p>
           )}
         </div>
-
-        {playbackConfig && (
-          <div style={{ marginTop: 16, fontSize: 12, color: "#aaa" }}>
-            <div>
-              Last simulation: duration {playbackConfig.durationSec}s,
-              dt {playbackConfig.dtSec}s
-            </div>
-          </div>
-        )}
       </div>
 
       <div style={{ flex: 1 }}>
