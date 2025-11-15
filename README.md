@@ -7,11 +7,10 @@ Minimal mono-repo for a musical orrery. Backend computes planet positions and mu
 ```sh
 # Backend
 cd backend
-poetry install
-poetry run uvicorn main:app --reload
+python -m uvicorn main:app --reload
 
 # Frontend
-cd ../frontend
+cd frontend
 pnpm install
 pnpm dev
 ```

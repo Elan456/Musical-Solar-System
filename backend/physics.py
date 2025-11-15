@@ -1,21 +1,92 @@
-import numpy as np
+"""
+Utilities for constructing a System instance from a request payload and
+sampling its positions for the frontend. Uses simplified game units so
+numbers remain readable and render nicely in the 2D plane.
+"""
+
+from __future__ import annotations
+
+import math
+from typing import Any, Dict, List
+
+from .system import System
+
+SIM_G = 0.01  # Tuned gravitational constant for simplified masses/lengths
+STAR_MASS_SCALE = 100.0  # Amplify star mass so planets orbit sensibly
+
 
 def period_days(aAU: float) -> float:
     # Kepler's third law, solar mass = 1
     return 365.25 * aAU ** 1.5
 
-def samples_for_system(system, durationSec, dtSec):
-    planets = system["planets"]
-    n_steps = int(durationSec / dtSec) + 1
-    samples = []
-    for i in range(n_steps):
-        t = i * dtSec
-        ps = []
-        for p in planets:
-            T = period_days(p["aAU"])
-            theta = 2 * np.pi * (t / (T * 86400 / durationSec))
-            x = p["aAU"] * np.cos(theta)
-            y = p["aAU"] * np.sin(theta)
-            ps.append({"name": p["name"], "x": x, "y": y})
-        samples.append({"t": t, "planets": ps})
+
+def _build_initial_bodies(system_cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
+    star_mass = system_cfg["star"]["massMs"] * STAR_MASS_SCALE
+    bodies: List[Dict[str, Any]] = [
+        {
+            "name": system_cfg["star"].get("name", "Star"),
+            "mass": star_mass,
+            "position": [0.0, 0.0, 0.0],
+            "velocity": [0.0, 0.0, 0.0],
+            "metadata": {
+                "kind": "star",
+                "color": "#ffffcc",
+                "radius": 12,
+                "visible": False,
+            },
+        }
+    ]
+
+    for planet in system_cfg["planets"]:
+        distance = planet["aAU"]
+        speed = 0.0
+        if distance > 0:
+            speed = math.sqrt(SIM_G * star_mass / distance)
+        bodies.append(
+            {
+                "name": planet["name"],
+                "mass": planet["mass"],
+                "position": [distance, 0.0, 0.0],
+                "velocity": [0.0, speed, 0.0],
+                "metadata": {**planet, "visible": True},
+            }
+        )
+    return bodies
+
+
+def samples_for_system(system_cfg: Dict[str, Any], duration_sec: float, dt_sec: float):
+    if dt_sec <= 0:
+        raise ValueError("dtSec must be positive")
+    system = System(
+        name="User system",
+        gravitational_constant=SIM_G,
+        initial_bodies=_build_initial_bodies(system_cfg),
+    )
+    sample_rate = 1.0 / dt_sec
+    raw_samples = system.sample_positions(
+        duration_seconds=duration_sec, sample_rate_hz=sample_rate
+    )
+    samples: List[Dict[str, Any]] = []
+    for sample in raw_samples:
+        planets = []
+        for body in sample["bodies"]:
+            metadata = dict(body.get("metadata") or {})
+            if metadata.get("visible", True) is False:
+                continue
+            position = body["position"]
+            x = position[0]
+            y = position[1]
+            planets.append(
+                {
+                    "name": body["name"],
+                    "kind": metadata.get("kind", "rocky"),
+                    "aAU": metadata.get("aAU", math.sqrt(x * x + y * y)),
+                    "mass": metadata.get("mass"),
+                    "color": metadata.get("color", "#ffffff"),
+                    "radius": metadata.get("radius", 5),
+                    "x": x,
+                    "y": y,
+                }
+            )
+        samples.append({"t": sample["t"], "planets": planets})
     return samples

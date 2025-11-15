@@ -1,6 +1,15 @@
+export type BodyTemplate = {
+  name: string;
+  kind: "rocky" | "gas";
+  aAU: number;
+  mass: number;
+  color: string;
+  radius: number;
+};
+
 export type SystemPreset = {
   star: { massMs: number };
-  planets: { name: string; kind: "rocky" | "gas"; aAU: number }[];
+  planets: BodyTemplate[];
   durationSec: number;
   dtSec: number;
   musicMode: "per_orbit_note" | "continuous_tone";
@@ -10,6 +19,9 @@ export type Planet = {
   name: string;
   kind: "rocky" | "gas";
   aAU: number;
+  mass?: number;
+  color?: string;
+  radius?: number;
   x: number;
   y: number;
 };
