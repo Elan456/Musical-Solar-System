@@ -27,7 +27,6 @@ Open [http://localhost:5173](http://localhost:5173) and click "Compute" to see t
 - Add planet editing UI
 - Add more instruments and sound design
 - Add more physics (eccentricity, multi-star, etc.)
-- Add more presets
 
 ---
 

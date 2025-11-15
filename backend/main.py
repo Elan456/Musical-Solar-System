@@ -58,24 +58,6 @@ class ComputeResponse(BaseModel):
     meta: dict
 
 
-PRESET = {
-    "star": {"massMs": 1.0},
-    "planets": [
-        {
-            "name": "Terra",
-            "kind": "rocky",
-            "aAU": 1.0,
-            "mass": 1.0,
-            "color": "#4cafef",
-            "radius": 6,
-        }
-    ],
-    "durationSec": 300,
-    "dtSec": 0.1,
-    "musicMode": "per_orbit_note",
-}
-
-
 @app.post("/api/compute", response_model=ComputeResponse)
 def compute(req: ComputeRequest):
     payload = req.dict()
@@ -83,8 +65,3 @@ def compute(req: ComputeRequest):
     events = events_for_system(payload, req.durationSec, req.musicMode)
     meta = {"dtSec": req.dtSec, "musicMode": req.musicMode}
     return {"samples": samples, "events": events, "meta": meta}
-
-
-@app.get("/api/presets")
-def presets():
-    return [PRESET]

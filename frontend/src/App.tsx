@@ -5,67 +5,11 @@ import React, {
   useCallback,
   useMemo,
 } from "react";
-import {
-  SystemPreset,
-  ComputeResponse,
-  Planet,
-  BodyTemplate,
-} from "./types";
+import { SystemPreset, ComputeResponse, Planet, BodyTemplate } from "./types";
 import { stopAll } from "./audio";
 import CustomBodyPanel from "./components/CustomBodyPanel";
 
 const API = "http://localhost:8000/api";
-
-const BODY_CATALOG: BodyTemplate[] = [
-  {
-    name: "Mercury",
-    kind: "rocky",
-    aAU: 0.4,
-    mass: 0.06,
-    color: "#b8b4ad",
-    radius: 4,
-  },
-  {
-    name: "Venus",
-    kind: "rocky",
-    aAU: 0.7,
-    mass: 0.82,
-    color: "#d1a16b",
-    radius: 5,
-  },
-  {
-    name: "Earth",
-    kind: "rocky",
-    aAU: 1.0,
-    mass: 1.0,
-    color: "#4cafef",
-    radius: 6,
-  },
-  {
-    name: "Mars",
-    kind: "rocky",
-    aAU: 1.5,
-    mass: 0.11,
-    color: "#c1440e",
-    radius: 5,
-  },
-  {
-    name: "Jupiter",
-    kind: "gas",
-    aAU: 2.5,
-    mass: 20,
-    color: "#c58b50",
-    radius: 10,
-  },
-  {
-    name: "Saturn",
-    kind: "gas",
-    aAU: 3.5,
-    mass: 10,
-    color: "#d8c177",
-    radius: 9,
-  },
-];
 
 const defaultPreset: SystemPreset = {
   star: { massMs: 1.0 },
@@ -126,16 +70,6 @@ const App: React.FC = () => {
       return candidate;
     },
     [system.planets]
-  );
-
-  const addBodyToSystem = useCallback(
-    (template: BodyTemplate) => {
-      setSystem((prev) => {
-        const planet = { ...template, name: makeUniqueName(template.name) };
-        return { ...prev, planets: [...prev.planets, planet] };
-      });
-    },
-    [makeUniqueName]
   );
 
   const removePlanet = useCallback((index: number) => {
@@ -386,50 +320,32 @@ const App: React.FC = () => {
         style={{
           width: 360,
           padding: 16,
-          overflowY: "auto",
-          background: "#111",
-          color: "#f5f5f5",
-        }}
-      >
-        <h2>Premade Bodies</h2>
+      overflowY: "auto",
+      background: "#111",
+      color: "#f5f5f5",
+    }}
+  >
+        <h2>Custom Bodies</h2>
         <p>
-          Select bodies to include in your system. Each selection adds a preset
-          with mass, color, and radius.
+          Design every object yourself. Use the custom body controls below to choose
+          physical traits, start placement, then click on the simulation to preview and
+          add it to the system.
         </p>
-        <div
-          style={{ display: "flex", flexDirection: "column", gap: 12 }}
-        >
-          {BODY_CATALOG.map((body) => (
-            <div
-              key={body.name}
-              style={{
-                border: "1px solid #333",
-                borderRadius: 8,
-                padding: 12,
-                background: "#1b1b1b",
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-              }}
-            >
-              <div>
-                <strong>{body.name}</strong>
-                <div style={{ fontSize: 12, color: "#bbb" }}>
-                  {body.kind === "rocky" ? "Rocky world" : "Gas giant"}
-                </div>
-                <div style={{ fontSize: 12 }}>
-                  Radius: {body.radius}px • Mass:{" "}
-                  {body.mass.toFixed(2)} u
-                </div>
-              </div>
-              <button onClick={() => addBodyToSystem(body)}>Add</button>
-            </div>
-          ))}
-        </div>
+
+        <CustomBodyPanel
+          config={customBody}
+          onChange={setCustomBody}
+          placementActive={placementMode}
+          onPlacementToggle={handlePlacementToggle}
+          canCommit={!!pendingPlanet}
+          onCommit={confirmCustomBody}
+          onClear={clearPreview}
+          predicting={predicting}
+        />
 
         <h3 style={{ marginTop: 24 }}>Selected Bodies</h3>
         {system.planets.length === 0 && (
-          <p>No bodies yet. Add from the list above.</p>
+          <p>No bodies yet. Use the custom body panel above to add them.</p>
         )}
         {system.planets.map((planet, index) => (
           <div
@@ -511,17 +427,6 @@ const App: React.FC = () => {
             </div>
           </div>
         )}
-
-        <CustomBodyPanel
-          config={customBody}
-          onChange={setCustomBody}
-          placementActive={placementMode}
-          onPlacementToggle={handlePlacementToggle}
-          canCommit={!!pendingPlanet}
-          onCommit={confirmCustomBody}
-          onClear={clearPreview}
-          predicting={predicting}
-        />
       </div>
 
       <div style={{ flex: 1 }}>
