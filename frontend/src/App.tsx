@@ -17,6 +17,8 @@ import CustomBodyPanel from "./components/CustomBodyPanel";
 
 const API = "http://localhost:8000/api";
 
+const RENDERSCALE = 500;
+
 const DEFAULT_PLANET_COLORS: Record<CustomBodyConfig["kind"], string> = {
   rocky: "#aaaaaa",
   gas: "#4af4ff",
@@ -51,7 +53,7 @@ const ensurePlanetForPayload = (planet: BodyTemplate): BodyTemplate => {
 const defaultPreset: SystemPreset = {
   star: { massMs: 1.0 },
   planets: [],
-  durationSec: 30,
+  durationSec: 10,
   dtSec: 0.016,
   musicMode: "rich",
 };
@@ -231,6 +233,7 @@ const App: React.FC = () => {
     []
   );
 
+  // Recompute sim when planets change, but not while dragging
   useEffect(() => {
     if (isDragging) {
       return;
@@ -258,7 +261,8 @@ const App: React.FC = () => {
     async (planet: BodyTemplate) => {
       const requestId = ++previewRequestRef.current;
       setPredicting(true);
-      setTrajectory(null);
+      // Do not clear trajectory here; keep old one until new one is ready
+
       try {
         const overridePlanets = (() => {
           const idx = system.planets.findIndex((p) => p.name === planet.name);
@@ -293,7 +297,8 @@ const App: React.FC = () => {
       } catch (err) {
         console.error("Failed to predict trajectory", err);
         if (previewRequestRef.current === requestId) {
-          setTrajectory(null);
+          // Keep old trajectory instead of clearing completely
+          // setTrajectory(null);
         }
       } finally {
         if (previewRequestRef.current === requestId) {
@@ -309,10 +314,11 @@ const App: React.FC = () => {
       if (previewDebounceRef.current !== null) {
         window.clearTimeout(previewDebounceRef.current);
       }
+      // Shorter debounce for more responsive dragging
       const handle = window.setTimeout(() => {
         fetchTrajectoryPreview(planet);
         previewDebounceRef.current = null;
-      }, 200);
+      }, 80);
       previewDebounceRef.current = handle;
     },
     [fetchTrajectoryPreview]
@@ -387,7 +393,6 @@ const App: React.FC = () => {
   );
 
   const handlePause = useCallback(() => {
-    // make sure the audio loop callback sees this
     audioLoopActiveRef.current = false;
     playingRef.current = false;
 
@@ -395,7 +400,7 @@ const App: React.FC = () => {
     stopAll();
   }, []);
 
-const handleReset = useCallback(() => {
+  const handleReset = useCallback(() => {
     audioLoopActiveRef.current = false;
     playingRef.current = false;
 
@@ -404,7 +409,6 @@ const handleReset = useCallback(() => {
     setPlayhead(0);
     playStartRef.current = null;
   }, []);
-
 
   const startAudioLoop = useCallback(() => {
     if (!data?.events?.length) {
@@ -484,32 +488,7 @@ const handleReset = useCallback(() => {
     return samples[idx] ?? null;
   }, [data, hasSimData, playbackConfig, system.dtSec, playhead]);
 
-  const renderScale = useMemo(() => {
-    if (!currentSample || !Array.isArray(currentSample.planets)) return 100;
-    const maxOrbit = currentSample.planets.reduce(
-      (max: number, p: Planet) =>
-        Math.max(max, Math.abs((p as any).aAU ?? 0)),
-      1
-    );
-    return maxOrbit > 0 ? 220 / maxOrbit : 100;
-  }, [currentSample]);
-
-  const renderPlanets = useCallback(() => {
-    if (!currentSample || !Array.isArray(currentSample.planets)) return null;
-    return currentSample.planets.map((p: Planet) => {
-      const { x, y, name, radius, color, kind } = p as any;
-      if (typeof x !== "number" || typeof y !== "number") return null;
-      return (
-        <circle
-          key={name}
-          cx={250 + x * renderScale}
-          cy={250 + y * renderScale}
-          r={radius ?? 6}
-          fill={color ?? (kind === "rocky" ? "#aaa" : "#4af")}
-        />
-      );
-    });
-  }, [currentSample, renderScale]);
+  const renderScale = RENDERSCALE / 2;
 
   const getSimCoords = useCallback(
     (evt: React.MouseEvent<SVGSVGElement, MouseEvent>) => {
@@ -526,6 +505,43 @@ const handleReset = useCallback(() => {
     },
     [renderScale]
   );
+
+  const renderPlanets = useCallback(() => {
+    if (!currentSample || !Array.isArray(currentSample.planets)) return null;
+
+    const draggingTemplate =
+      draggingPlanetName != null
+        ? system.planets.find((p) => p.name === draggingPlanetName)
+        : null;
+
+    return currentSample.planets.map((p: Planet) => {
+      let { x, y, name, radius, color, kind } = p as any;
+      if (typeof x !== "number" || typeof y !== "number") return null;
+
+      // While dragging, override the simulated position for the dragged planet
+      if (
+        draggingTemplate &&
+        name === draggingTemplate.name &&
+        draggingTemplate.position
+      ) {
+        x = draggingTemplate.position[0];
+        y = draggingTemplate.position[1];
+      }
+
+      const cx = 250 + x * renderScale;
+      const cy = 250 + y * renderScale;
+
+      return (
+        <circle
+          key={name}
+          cx={cx}
+          cy={cy}
+          r={radius ?? 6}
+          fill={color ?? (kind === "rocky" ? "#aaa" : "#4af")}
+        />
+      );
+    });
+  }, [currentSample, renderScale, draggingPlanetName, system.planets]);
 
   const findPlanetIndexAtEvent = useCallback(
     (evt: React.MouseEvent<SVGSVGElement, MouseEvent>) => {
@@ -559,19 +575,17 @@ const handleReset = useCallback(() => {
     (evt: React.MouseEvent<SVGSVGElement, MouseEvent>) => {
       const index = findPlanetIndexAtEvent(evt);
       if (index === null) return;
+
       const planet = system.planets[index];
       setSelectedPlanetName(planet.name);
       syncCustomBodyToPlanet(planet);
       setDraggingPlanetName(planet.name);
       setIsDragging(true);
-      scheduleTrajectoryPreview(planet);
+
+      // Do NOT schedule trajectory here; we want the first preview
+      // to be based on the *dragged* position, not the original one.
     },
-    [
-      findPlanetIndexAtEvent,
-      system.planets,
-      syncCustomBodyToPlanet,
-      scheduleTrajectoryPreview,
-    ]
+    [findPlanetIndexAtEvent, system.planets, syncCustomBodyToPlanet]
   );
 
   const handleCanvasMouseMove = useCallback(
