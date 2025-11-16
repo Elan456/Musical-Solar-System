@@ -12,10 +12,15 @@ import {
   BodyTemplate,
   CustomBodyConfig,
 } from "./types";
-import { stopAll } from "./audio";
+import { stopAll, playEvents } from "./audio";
 import CustomBodyPanel from "./components/CustomBodyPanel";
 
 const API = "http://localhost:8000/api";
+
+const DEFAULT_PLANET_COLORS: Record<CustomBodyConfig["kind"], string> = {
+  rocky: "#aaaaaa",
+  gas: "#4af4ff",
+};
 
 const computeMassFromConfig = (cfg: CustomBodyConfig): number => {
   const base = Math.max(cfg.radius, 1);
@@ -23,12 +28,32 @@ const computeMassFromConfig = (cfg: CustomBodyConfig): number => {
   return parseFloat(mass.toFixed(3));
 };
 
+const ensurePlanetForPayload = (planet: BodyTemplate): BodyTemplate => {
+  const kind = planet.kind ?? "rocky";
+  const radius = planet.radius ?? 6;
+  const color = planet.color ?? DEFAULT_PLANET_COLORS[kind];
+  const ellipticity = planet.ellipticity ?? 0;
+  const rawMass = (planet as any).mass;
+  const mass =
+    typeof rawMass === "number" && Number.isFinite(rawMass)
+      ? rawMass
+      : computeMassFromConfig({ kind, color, radius, ellipticity });
+  return {
+    ...planet,
+    kind,
+    radius,
+    color,
+    ellipticity,
+    mass,
+  };
+};
+
 const defaultPreset: SystemPreset = {
   star: { massMs: 1.0 },
   planets: [],
   durationSec: 30,
   dtSec: 0.016,
-  musicMode: "per_orbit_note",
+  musicMode: "rich",
 };
 
 type PlaybackConfig = {
@@ -54,6 +79,7 @@ const App: React.FC = () => {
     kind: "rocky",
     color: "#ffffff",
     radius: 6,
+    ellipticity: 0,
   });
 
   const [trajectory, setTrajectory] = useState<{
@@ -72,6 +98,8 @@ const App: React.FC = () => {
   const previewRequestRef = useRef(0);
   const previewDebounceRef = useRef<number | null>(null);
   const computeRequestRef = useRef(0);
+  const audioLoopActiveRef = useRef(false);
+  const playingRef = useRef(playing);
 
   const hasSimData =
     !!data &&
@@ -112,6 +140,7 @@ const App: React.FC = () => {
       kind: planet.kind,
       color: planet.color ?? "#ffffff",
       radius: planet.radius ?? 6,
+      ellipticity: planet.ellipticity ?? 0,
     });
   }, []);
 
@@ -136,9 +165,9 @@ const App: React.FC = () => {
 
   const buildSimulationPayload = useCallback(
     (planetsOverride?: BodyTemplate[]) => {
-      const clonePlanets = (planetsOverride ?? system.planets).map((p) => ({
-        ...p,
-      }));
+      const clonePlanets = (planetsOverride ?? system.planets)
+        .map((p) => ({ ...p }))
+        .map(ensurePlanetForPayload);
       return {
         star: { ...system.star },
         planets: clonePlanets,
@@ -307,6 +336,7 @@ const App: React.FC = () => {
       kind: customBody.kind,
       color: customBody.color,
       radius: customBody.radius,
+      ellipticity: customBody.ellipticity,
       mass,
       aAU: orbit,
       position: [orbit, 0, 0],
@@ -357,24 +387,52 @@ const App: React.FC = () => {
   );
 
   const handlePause = useCallback(() => {
+    // make sure the audio loop callback sees this
+    audioLoopActiveRef.current = false;
+    playingRef.current = false;
+
     setPlaying(false);
     stopAll();
   }, []);
 
-  const handleReset = useCallback(() => {
+const handleReset = useCallback(() => {
+    audioLoopActiveRef.current = false;
+    playingRef.current = false;
+
     setPlaying(false);
     stopAll();
     setPlayhead(0);
     playStartRef.current = null;
   }, []);
 
+
+  const startAudioLoop = useCallback(() => {
+    if (!data?.events?.length) {
+      return;
+    }
+    audioLoopActiveRef.current = true;
+    playEvents(data.events, () => {
+      if (audioLoopActiveRef.current && playingRef.current) {
+        startAudioLoop();
+      }
+    });
+  }, [data]);
+
+  useEffect(() => {
+    playingRef.current = playing;
+    if (!playing) {
+      audioLoopActiveRef.current = false;
+    }
+  }, [playing]);
+
   const handlePlay = useCallback(() => {
     if (!data || !playbackConfig || isComputing) return;
     if (!hasSimData) return;
 
+    startAudioLoop();
     playStartRef.current = performance.now() - playhead * 1000;
     setPlaying(true);
-  }, [data, playbackConfig, isComputing, hasSimData, playhead]);
+  }, [data, playbackConfig, isComputing, hasSimData, playhead, startAudioLoop]);
 
   useEffect(() => {
     if (!playing || !data || !playbackConfig || !hasSimData) {

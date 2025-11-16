@@ -26,6 +26,7 @@ class Planet(BaseModel):
     mass: float
     color: str
     radius: float
+    ellipticity: Optional[float] = None
     position: Optional[List[float]] = None
     velocity: Optional[List[float]] = None
 
@@ -35,7 +36,7 @@ class ComputeRequest(BaseModel):
     planets: List[Planet]
     durationSec: float
     dtSec: float
-    musicMode: Literal["per_orbit_note", "continuous_tone"]
+    musicMode: Literal["per_orbit_note", "continuous_tone", "rich"]
 
 
 class Sample(BaseModel):
@@ -62,6 +63,6 @@ class ComputeResponse(BaseModel):
 def compute(req: ComputeRequest):
     payload = req.dict()
     samples = samples_for_system(payload, req.durationSec, req.dtSec)
-    events = events_for_system(payload, req.durationSec, req.musicMode)
+    events = events_for_system(samples, req.durationSec, req.musicMode)
     meta = {"dtSec": req.dtSec, "musicMode": req.musicMode}
     return {"samples": samples, "events": events, "meta": meta}

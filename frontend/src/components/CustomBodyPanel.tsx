@@ -96,6 +96,21 @@ export function CustomBodyPanel({
           onChange={(e) => update("radius", parseInt(e.target.value, 10))}
         />
       </label>
+      <label style={labelStyle}>
+        Orbit Ellipticity
+        <input
+          style={inputStyle}
+          type="range"
+          min={0}
+          max={1}
+          step={0.05}
+          value={config.ellipticity}
+          onChange={(e) => update("ellipticity", parseFloat(e.target.value))}
+        />
+        <span style={{ fontSize: 11, color: "#888" }}>
+          0 is circular, drag right for a more stretched orbit.
+        </span>
+      </label>
       {predicting && <p style={{ fontSize: 12, color: "#bbb", marginTop: 8 }}>Predicting trajectory…</p>}
       {!predicting && hasPending && (
         <p style={{ fontSize: 12, color: "#bbb", marginTop: 8 }}>

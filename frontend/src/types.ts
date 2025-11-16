@@ -5,6 +5,7 @@ export type BodyTemplate = {
   mass: number;
   color: string;
   radius: number;
+  ellipticity?: number;
   position?: [number, number, number];
   velocity?: [number, number, number];
 };
@@ -17,7 +18,12 @@ export type SystemPreset = {
   musicMode: "per_orbit_note" | "continuous_tone";
 };
 
-export type CustomBodyConfig = Pick<BodyTemplate, "kind" | "color" | "radius">;
+export type CustomBodyConfig = Pick<
+  BodyTemplate,
+  "kind" | "color" | "radius"
+> & {
+  ellipticity: number;
+};
 
 export type Planet = {
   name: string;

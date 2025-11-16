@@ -61,17 +61,25 @@ def _build_initial_bodies(system_cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
             if dist_xy > 0:
                 speed = math.sqrt(SIM_G * star_mass / dist_xy)
                 direction = [-position_vec[1] / dist_xy, position_vec[0] / dist_xy, 0.0]
-                velocity_vec = [direction[0] * speed, direction[1] * speed, 0.0]
+                ellipticity = float(planet.get("ellipticity") or 0.0)
+                ellipticity = max(0.0, min(ellipticity, 0.95))
+                velocity_scale = 1.0 - 0.5 * ellipticity
+                velocity_vec = [
+                    direction[0] * speed * velocity_scale,
+                    direction[1] * speed * velocity_scale,
+                    0.0,
+                ]
             else:
                 velocity_vec = [0.0, 0.0, 0.0]
 
+        metadata = {**planet, "visible": True}
         bodies.append(
             {
                 "name": planet["name"],
                 "mass": planet["mass"],
                 "position": position_vec,
                 "velocity": velocity_vec,
-                "metadata": {**planet, "visible": True},
+                "metadata": metadata,
             }
         )
     return bodies
