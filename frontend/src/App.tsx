@@ -16,7 +16,6 @@ import { stopAll, playEvents } from "./audio";
 import CustomBodyPanel from "./components/CustomBodyPanel";
 
 const API = "http://localhost:8000/api";
-
 const RENDERSCALE = 500;
 
 const DEFAULT_PLANET_COLORS: Record<CustomBodyConfig["kind"], string> = {
@@ -66,9 +65,8 @@ type PlaybackConfig = {
 const App: React.FC = () => {
   const [system, setSystem] = useState<SystemPreset>(defaultPreset);
   const [data, setData] = useState<ComputeResponse | null>(null);
-  const [playbackConfig, setPlaybackConfig] = useState<PlaybackConfig | null>(
-    null
-  );
+  const [playbackConfig, setPlaybackConfig] =
+    useState<PlaybackConfig | null>(null);
   const [playing, setPlaying] = useState(false);
   const [playhead, setPlayhead] = useState(0);
   const [isComputing, setIsComputing] = useState(false);
@@ -94,12 +92,12 @@ const App: React.FC = () => {
   const [draggingPlanetName, setDraggingPlanetName] = useState<string | null>(
     null
   );
+  const latestDraggedPlanetRef = useRef<BodyTemplate | null>(null);
 
   const rafRef = useRef<number | null>(null);
   const playStartRef = useRef<number | null>(null);
-  const previewRequestRef = useRef(0);
-  const previewDebounceRef = useRef<number | null>(null);
   const computeRequestRef = useRef(0);
+  const previewRequestRef = useRef(0);
   const audioLoopActiveRef = useRef(false);
   const playingRef = useRef(playing);
 
@@ -135,6 +133,9 @@ const App: React.FC = () => {
     setSelectedPlanetName((prev) =>
       removedName && prev === removedName ? null : prev
     );
+    setTrajectory((prev) =>
+      removedName && prev?.planetName === removedName ? null : prev
+    );
   }, []);
 
   const syncCustomBodyToPlanet = useCallback((planet: BodyTemplate) => {
@@ -154,6 +155,7 @@ const App: React.FC = () => {
       syncCustomBodyToPlanet(planet);
       setTrajectory(null);
       setDraggingPlanetName(null);
+      latestDraggedPlanetRef.current = null;
     },
     [system.planets, syncCustomBodyToPlanet]
   );
@@ -170,6 +172,7 @@ const App: React.FC = () => {
       const clonePlanets = (planetsOverride ?? system.planets)
         .map((p) => ({ ...p }))
         .map(ensurePlanetForPayload);
+
       return {
         star: { ...system.star },
         planets: clonePlanets,
@@ -187,57 +190,49 @@ const App: React.FC = () => {
     ]
   );
 
-  const runSimulation = useCallback(
-    async (payload: SystemPreset, requestId: number) => {
-      setIsComputing(true);
-      setError(null);
-      setPlaying(false);
-      stopAll();
-      playStartRef.current = null;
-      setPlayhead(0);
+  const runSimulation = useCallback(async (payload: SystemPreset, requestId: number) => {
+    setIsComputing(true);
+    setError(null);
+    setPlaying(false);
+    stopAll();
+    playStartRef.current = null;
+    setPlayhead(0);
 
-      try {
-        const res = await fetch(`${API}/compute`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
+    try {
+      const res = await fetch(`${API}/compute`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
 
-        if (!res.ok) {
-          throw new Error(`Server responded with ${res.status}`);
-        }
-
-        const json: ComputeResponse = await res.json();
-        if (requestId !== computeRequestRef.current) {
-          return;
-        }
-        setData(json);
-        setPlaybackConfig({
-          durationSec: payload.durationSec,
-          dtSec: payload.dtSec,
-        });
-      } catch (err: any) {
-        console.error(err);
-        if (requestId !== computeRequestRef.current) {
-          return;
-        }
-        setError(err?.message ?? "Failed to run simulation");
-        setData(null);
-        setPlaybackConfig(null);
-      } finally {
-        if (requestId === computeRequestRef.current) {
-          setIsComputing(false);
-        }
+      if (!res.ok) {
+        throw new Error(`Server responded with ${res.status}`);
       }
-    },
-    []
-  );
 
-  // Recompute sim when planets change, but not while dragging
-  useEffect(() => {
-    if (isDragging) {
-      return;
+      const json: ComputeResponse = await res.json();
+      if (requestId !== computeRequestRef.current) return;
+
+      setData(json);
+      setPlaybackConfig({
+        durationSec: payload.durationSec,
+        dtSec: payload.dtSec,
+      });
+    } catch (err: any) {
+      console.error(err);
+      if (requestId !== computeRequestRef.current) return;
+      setError(err?.message ?? "Failed to run simulation");
+      setData(null);
+      setPlaybackConfig(null);
+    } finally {
+      if (requestId === computeRequestRef.current) {
+        setIsComputing(false);
+      }
     }
+  }, []);
+
+  // Main simulation recomputes on planet changes, except during drag.
+  useEffect(() => {
+    if (isDragging) return;
 
     if (!system.planets.length) {
       computeRequestRef.current += 1;
@@ -257,22 +252,18 @@ const App: React.FC = () => {
     runSimulation(payload, requestId);
   }, [system.planets, buildSimulationPayload, runSimulation, isDragging]);
 
-  const fetchTrajectoryPreview = useCallback(
+  // Compute a trajectory line for a single planet using current system + override.
+  const computeTrajectoryPreview = useCallback(
     async (planet: BodyTemplate) => {
       const requestId = ++previewRequestRef.current;
       setPredicting(true);
-      // Do not clear trajectory here; keep old one until new one is ready
 
       try {
-        const overridePlanets = (() => {
-          const idx = system.planets.findIndex((p) => p.name === planet.name);
-          if (idx === -1) {
-            return [...system.planets, planet];
-          }
-          const clone = system.planets.map((p) => ({ ...p }));
-          clone[idx] = { ...planet };
-          return clone;
-        })();
+        const idx = system.planets.findIndex((p) => p.name === planet.name);
+        const overridePlanets =
+          idx === -1
+            ? [...system.planets, planet]
+            : system.planets.map((p, i) => (i === idx ? { ...planet } : { ...p }));
 
         const payload = buildSimulationPayload(overridePlanets);
         const res = await fetch(`${API}/compute`, {
@@ -280,10 +271,14 @@ const App: React.FC = () => {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
+
         if (!res.ok) {
           throw new Error(`Server responded with ${res.status}`);
         }
+
         const json: ComputeResponse = await res.json();
+        if (previewRequestRef.current !== requestId) return;
+
         const points =
           json.samples
             ?.map((sample) =>
@@ -291,13 +286,12 @@ const App: React.FC = () => {
             )
             .filter(Boolean)
             .map((p: Planet) => ({ x: p.x, y: p.y })) ?? [];
-        if (previewRequestRef.current === requestId) {
-          setTrajectory({ planetName: planet.name, points });
-        }
+
+        setTrajectory({ planetName: planet.name, points });
       } catch (err) {
-        console.error("Failed to predict trajectory", err);
+        console.error("Failed to compute trajectory preview", err);
         if (previewRequestRef.current === requestId) {
-          // Keep old trajectory instead of clearing completely
+          // keep previous trajectory if you want, or clear:
           // setTrajectory(null);
         }
       } finally {
@@ -309,34 +303,12 @@ const App: React.FC = () => {
     [system.planets, buildSimulationPayload]
   );
 
-  const scheduleTrajectoryPreview = useCallback(
-    (planet: BodyTemplate) => {
-      if (previewDebounceRef.current !== null) {
-        window.clearTimeout(previewDebounceRef.current);
-      }
-      // Shorter debounce for more responsive dragging
-      const handle = window.setTimeout(() => {
-        fetchTrajectoryPreview(planet);
-        previewDebounceRef.current = null;
-      }, 80);
-      previewDebounceRef.current = handle;
-    },
-    [fetchTrajectoryPreview]
-  );
-
-  useEffect(() => {
-    return () => {
-      if (previewDebounceRef.current !== null) {
-        window.clearTimeout(previewDebounceRef.current);
-      }
-    };
-  }, []);
-
   const handleSpawnPlanet = useCallback(() => {
     const baseName = customBody.kind === "gas" ? "Gas Giant" : "Rocky Body";
     const name = makeUniqueName(baseName);
     const mass = computeMassFromConfig(customBody);
     const orbit = 0.3 + system.planets.length * 0.15;
+
     const newPlanet: BodyTemplate = {
       name,
       kind: customBody.kind,
@@ -352,50 +324,50 @@ const App: React.FC = () => {
       ...prev,
       planets: [...prev.planets, newPlanet],
     }));
+
     setSelectedPlanetName(name);
     syncCustomBodyToPlanet(newPlanet);
     setTrajectory(null);
-    scheduleTrajectoryPreview(newPlanet);
+
+    // Not dragging here, so safe to preview immediately.
+    computeTrajectoryPreview(newPlanet);
   }, [
     customBody,
     makeUniqueName,
     system.planets.length,
     syncCustomBodyToPlanet,
-    scheduleTrajectoryPreview,
+    computeTrajectoryPreview,
   ]);
 
   const handleCustomBodyChange = useCallback(
     (cfg: CustomBodyConfig) => {
       setCustomBody(cfg);
       if (!selectedPlanetName) return;
+
       const mass = computeMassFromConfig(cfg);
       let updatedPlanet: BodyTemplate | null = null;
 
       setSystem((prev) => {
         const planets = prev.planets.map((planet) => {
           if (planet.name !== selectedPlanetName) return planet;
-          const next: BodyTemplate = {
-            ...planet,
-            ...cfg,
-            mass,
-          };
+          const next: BodyTemplate = { ...planet, ...cfg, mass };
           updatedPlanet = next;
           return next;
         });
         return { ...prev, planets };
       });
 
-      if (updatedPlanet) {
-        scheduleTrajectoryPreview(updatedPlanet);
+      // Preview only if not dragging.
+      if (updatedPlanet && !isDragging) {
+        computeTrajectoryPreview(updatedPlanet);
       }
     },
-    [selectedPlanetName, scheduleTrajectoryPreview]
+    [selectedPlanetName, computeTrajectoryPreview, isDragging]
   );
 
   const handlePause = useCallback(() => {
     audioLoopActiveRef.current = false;
     playingRef.current = false;
-
     setPlaying(false);
     stopAll();
   }, []);
@@ -403,7 +375,6 @@ const App: React.FC = () => {
   const handleReset = useCallback(() => {
     audioLoopActiveRef.current = false;
     playingRef.current = false;
-
     setPlaying(false);
     stopAll();
     setPlayhead(0);
@@ -411,9 +382,7 @@ const App: React.FC = () => {
   }, []);
 
   const startAudioLoop = useCallback(() => {
-    if (!data?.events?.length) {
-      return;
-    }
+    if (!data?.events?.length) return;
     audioLoopActiveRef.current = true;
     playEvents(data.events, () => {
       if (audioLoopActiveRef.current && playingRef.current) {
@@ -424,9 +393,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     playingRef.current = playing;
-    if (!playing) {
-      audioLoopActiveRef.current = false;
-    }
+    if (!playing) audioLoopActiveRef.current = false;
   }, [playing]);
 
   const handlePlay = useCallback(() => {
@@ -498,9 +465,7 @@ const App: React.FC = () => {
       const center = 250;
       const simX = (xPx - center) / renderScale;
       const simY = (yPx - center) / renderScale;
-      if (!Number.isFinite(simX) || !Number.isFinite(simY)) {
-        return null;
-      }
+      if (!Number.isFinite(simX) || !Number.isFinite(simY)) return null;
       return { simX, simY };
     },
     [renderScale]
@@ -518,7 +483,7 @@ const App: React.FC = () => {
       let { x, y, name, radius, color, kind } = p as any;
       if (typeof x !== "number" || typeof y !== "number") return null;
 
-      // While dragging, override the simulated position for the dragged planet
+      // While dragging, show the dragged planet at its edited position.
       if (
         draggingTemplate &&
         name === draggingTemplate.name &&
@@ -545,9 +510,8 @@ const App: React.FC = () => {
 
   const findPlanetIndexAtEvent = useCallback(
     (evt: React.MouseEvent<SVGSVGElement, MouseEvent>) => {
-      if (!currentSample || !Array.isArray(currentSample.planets)) {
-        return null;
-      }
+      if (!currentSample || !Array.isArray(currentSample.planets)) return null;
+
       const bounds = evt.currentTarget.getBoundingClientRect();
       const xPx = evt.clientX - bounds.left;
       const yPx = evt.clientY - bounds.top;
@@ -579,11 +543,14 @@ const App: React.FC = () => {
       const planet = system.planets[index];
       setSelectedPlanetName(planet.name);
       syncCustomBodyToPlanet(planet);
+
       setDraggingPlanetName(planet.name);
       setIsDragging(true);
+      latestDraggedPlanetRef.current = planet;
 
-      // Do NOT schedule trajectory here; we want the first preview
-      // to be based on the *dragged* position, not the original one.
+      // Cancel any in flight preview and hide the line while dragging.
+      previewRequestRef.current += 1;
+      setTrajectory(null);
     },
     [findPlanetIndexAtEvent, system.planets, syncCustomBodyToPlanet]
   );
@@ -593,15 +560,16 @@ const App: React.FC = () => {
       if (!isDragging || !draggingPlanetName) return;
       const coords = getSimCoords(evt);
       if (!coords) return;
+
       const { simX, simY } = coords;
       const distance = Math.sqrt(simX * simX + simY * simY) || 0.01;
 
-      let updatedPlanet: BodyTemplate | null = null;
       setSystem((prev) => {
         const idx = prev.planets.findIndex(
           (p) => p.name === draggingPlanetName
         );
         if (idx === -1) return prev;
+
         const planets = prev.planets.map((p, i) => {
           if (i !== idx) return p;
           const next: BodyTemplate = {
@@ -609,29 +577,28 @@ const App: React.FC = () => {
             aAU: distance,
             position: [simX, simY, 0],
           };
-          updatedPlanet = next;
+          latestDraggedPlanetRef.current = next;
           return next;
         });
+
         return { ...prev, planets };
       });
-
-      if (updatedPlanet) {
-        scheduleTrajectoryPreview(updatedPlanet);
-      }
+      // No trajectory preview while dragging.
     },
-    [
-      isDragging,
-      draggingPlanetName,
-      getSimCoords,
-      scheduleTrajectoryPreview,
-    ]
+    [isDragging, draggingPlanetName, getSimCoords]
   );
 
-  const stopDragging = useCallback(() => {
+  const stopDragging = useCallback(async () => {
     if (!isDragging) return;
+
+    const finalPlanet = latestDraggedPlanetRef.current;
     setIsDragging(false);
     setDraggingPlanetName(null);
-  }, [isDragging]);
+
+    if (finalPlanet) {
+      computeTrajectoryPreview(finalPlanet);
+    }
+  }, [isDragging, computeTrajectoryPreview]);
 
   const handleCanvasMouseUp = useCallback(() => {
     stopDragging();
@@ -659,8 +626,8 @@ const App: React.FC = () => {
         <h2>Custom Bodies</h2>
         <p>
           Click or drag any planet in the simulation to edit it here. Spawn a
-          new planet, then drag it to place it while the predicted trajectory
-          updates.
+          new planet, then drag it to place it. The predicted trajectory appears
+          after you release the drag.
         </p>
 
         <CustomBodyPanel
@@ -678,9 +645,11 @@ const App: React.FC = () => {
           Click any body to tweak it, then drag it on the simulation to
           reposition.
         </p>
+
         {system.planets.length === 0 && (
           <p>No bodies yet. Use the controls above to add one.</p>
         )}
+
         {system.planets.map((planet, index) => (
           <div
             key={`${planet.name}-${index}`}
@@ -703,8 +672,7 @@ const App: React.FC = () => {
               </div>
               {planet.position && (
                 <div style={{ fontSize: 11, color: "#666" }}>
-                  Position: (
-                  {planet.position[0].toFixed(2)},{" "}
+                  Position: ({planet.position[0].toFixed(2)},{" "}
                   {planet.position[1].toFixed(2)})
                 </div>
               )}
@@ -756,6 +724,7 @@ const App: React.FC = () => {
             </div>
           )}
         </div>
+
         <svg
           width="500"
           height="500"
@@ -782,6 +751,7 @@ const App: React.FC = () => {
               opacity={0.7}
             />
           ) : null}
+
           {renderPlanets()}
         </svg>
       </div>

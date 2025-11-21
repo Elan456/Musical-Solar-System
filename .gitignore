@@ -350,4 +350,4 @@ vite.config.ts.timestamp-*
 .pnpm/
 
 .vscode/
-backend/orbital_events.json
+backend/orbit_events.json
