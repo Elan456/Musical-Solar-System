@@ -25,6 +25,7 @@ interface ScheduledNote {
 let allNotes = new Set<ScheduledNote>();
 let notesByPlanet: Record<string, ScheduledNote[]> = {};
 let stopTimer: number | null = null;
+let blinkTimers: Set<number> = new Set();
 
 function midiToFreq(midi: number) {
   return 440 * Math.pow(2, (midi - 69) / 12);
@@ -109,6 +110,10 @@ export function stopAll() {
   allNotes.clear();
   notesByPlanet = {};
   clearStopTimer();
+
+  // Clear all blink timers
+  blinkTimers.forEach((timerId) => clearTimeout(timerId));
+  blinkTimers.clear();
 }
 
 /**
@@ -395,7 +400,11 @@ export function playEvents(
       // Trigger blink callback for non-continuous notes
       if (!isContinuous) {
         const blinkDelay = (startTime - audioCtx.currentTime) * 1000;
-        setTimeout(() => onNoteBlink(e.planet), Math.max(0, blinkDelay));
+        const timerId = window.setTimeout(() => {
+          blinkTimers.delete(timerId);
+          onNoteBlink(e.planet);
+        }, Math.max(0, blinkDelay));
+        blinkTimers.add(timerId);
       }
     }
 
