@@ -190,6 +190,166 @@ def _get_planets_min_max_radius(samples: List[Dict[str, Any]]) -> Dict[str, Tupl
     
     return planet_min_max
 
+
+def _continuous_velocity_pads(
+    samples: List[Dict[str, Any]],
+    duration_sec: float,
+) -> List[Dict[str, Any]]:
+    """
+    Create continuous pad tones for gas giants that modulate in volume
+    based on their orbital velocity at each moment.
+    
+    Faster orbital velocity (near perihelion) -> louder
+    Slower orbital velocity (near aphelion) -> quieter
+    """
+    events: List[Dict[str, Any]] = []
+    if not samples or len(samples) < 2:
+        return events
+
+    first = samples[0]
+    
+    # Find star position
+    star_pos = None
+    for body in first.get("planets", []):
+        if body.get("kind") == "star":
+            star_pos = (
+                float(body.get("x") or 0.0),
+                float(body.get("y") or 0.0),
+            )
+            break
+    
+    if star_pos is None:
+        return events
+
+    # Get only gas planets
+    gas_planets = [
+        body for body in first.get("planets", [])
+        if body.get("kind") == "gas"
+    ]
+    
+    if not gas_planets:
+        return events
+
+    # Sort planets by distance for order assignment
+    planets_sorted = sorted(
+        (body for body in first.get("planets", []) if body.get("kind") != "star"),
+        key=lambda b: math.sqrt(
+            (float(b.get("x") or 0.0) - star_pos[0]) ** 2 +
+            (float(b.get("y") or 0.0) - star_pos[1]) ** 2
+        )
+    )
+    
+    all_orders = {planet["name"]: order for order, planet in enumerate(planets_sorted)}
+    max_order = max(all_orders.values()) if all_orders else 0
+
+    # Calculate eccentricities
+    planet_min_max = _get_planets_min_max_radius(samples)
+    all_eccentricities = {}
+    for planet in planets_sorted:
+        name = planet["name"]
+        min_r, max_r = planet_min_max.get(name, (0.0, 0.0))
+        all_eccentricities[name] = _calculate_eccentricity(min_r, max_r)
+
+    # Build velocity envelope for each gas planet
+    for gas_planet in gas_planets:
+        name = gas_planet["name"]
+        
+        # First pass: collect positions over time
+        positions: List[Tuple[float, float, float]] = []  # (t, x, y)
+        
+        for sample in samples:
+            t = float(sample.get("t") or 0.0)
+            
+            for body in sample.get("planets", []):
+                if body["name"] == name:
+                    x = float(body.get("x") or 0.0)
+                    y = float(body.get("y") or 0.0)
+                    positions.append((t, x, y))
+                    break
+        
+        if len(positions) < 2:
+            continue
+        
+        # Second pass: calculate speeds from position deltas
+        velocity_samples: List[Tuple[float, float]] = []
+        
+        for i in range(1, len(positions)):
+            t_prev, x_prev, y_prev = positions[i - 1]
+            t_curr, x_curr, y_curr = positions[i]
+            
+            dt = t_curr - t_prev
+            if dt <= 0:
+                continue
+            
+            # Calculate distance traveled
+            dx = x_curr - x_prev
+            dy = y_curr - y_prev
+            distance = math.sqrt(dx * dx + dy * dy)
+            
+            # Speed = distance / time
+            speed = distance / dt
+            velocity_samples.append((t_curr, speed))
+        
+        if not velocity_samples:
+            continue
+        
+        # Normalize velocities to 0-1 range
+        speeds = [v[1] for v in velocity_samples]
+        min_speed = min(speeds)
+        max_speed = max(speeds)
+        speed_range = max_speed - min_speed
+        
+        print(f"[PAD DEBUG] {name}: min_speed={min_speed:.4f}, max_speed={max_speed:.4f}, range={speed_range:.4f}")
+        
+        velocity_envelope = []
+        for t, speed in velocity_samples:
+            # Normalize to 0-1
+            if speed_range > 0.0001:  # Avoid division by near-zero
+                normalized = (speed - min_speed) / speed_range
+            else:
+                normalized = 0.5  # Circular orbit, constant speed
+            
+            # Apply floor so it never goes completely silent (0.2 to 1.0 range)
+            normalized = 0.2 + normalized * 0.8
+            velocity_envelope.append({"t": t, "velocity": normalized})
+        
+        # Get MIDI note and other properties
+        midi = get_note_from_order(all_orders[name], max_order)
+        eccentricity = all_eccentricities.get(name, 0.0)
+        reverb = _eccentricity_to_reverb(eccentricity)
+        
+        # Base velocity from planet radius
+        radius = float(gas_planet.get("radius") or RADIUS_RANGE[0])
+        base_vel = 80 - int(_radius_to_velocity(radius) * 40)
+        base_vel = max(1, min(127, base_vel))
+
+        # Create note_on with velocity envelope
+        events.append({
+            "t": 0,
+            "type": "note_on",
+            "planet": name,
+            "midi": midi,
+            "vel": base_vel,
+            "instrument": "pad",
+            "reverb": reverb,
+            "continuous": True,
+            "velocityEnvelope": velocity_envelope,
+            "eccentricity": eccentricity,
+        })
+        
+        # Create note_off at end of duration
+        events.append({
+            "t": duration_sec,
+            "type": "note_off",
+            "planet": name,
+        })
+        
+        print(f"[PAD] {name}: ecc={eccentricity:.2f}, velocities={len(velocity_envelope)} samples, "
+              f"speed range={min_speed:.4f}-{max_speed:.4f}")
+
+    return events
+
+
 def _planet_orbit_events(samples: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Emit a note each time a planet completes a full orbit around the star.
@@ -248,7 +408,7 @@ def _planet_orbit_events(samples: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
     # Initialize with starting angles
     for body in first.get("planets", []):
-        if body.get("kind") == "star":
+        if body.get("kind") == "star" or body['kind'] == 'gas':
             continue
         x = float(body.get("x") or 0.0) - initial_star_pos[0]
         y = float(body.get("y") or 0.0) - initial_star_pos[1]
@@ -325,11 +485,16 @@ def events_for_system(
     
     orbit_events = _planet_orbit_events(samples)
     print(f"Generated {len(orbit_events)} orbit events")
+    
+    # Generate continuous pads for gas planets
+    pad_events = _continuous_velocity_pads(samples, duration_sec)
+    print("pad events:", pad_events)
+    print(f"Generated {len(pad_events)} pad events")
+    
     # Write to a json file for inspection
     with open("orbit_events.json", "w") as f:
         json.dump(orbit_events, f, indent=2)
-    # pad_events = _continuous_velocity_pads(samples, duration_sec)
-    pad_events = []
+    
     events = orbit_events + pad_events
     events.sort(key=lambda e: e["t"])
     return events
