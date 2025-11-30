@@ -105,7 +105,7 @@ export function stopAll() {
   clearStopTimer();
 }
 
-export function playEvents(events: Event[], onDone: () => void) {
+export function playEvents(events: Event[], loopDuration: number, onDone: () => void) {
   if (!events?.length) {
     onDone();
     return;
@@ -204,9 +204,8 @@ export function playEvents(events: Event[], onDone: () => void) {
   const lastTime = events.reduce((max, e) => Math.max(max, e.t || 0), 0);
 
   clearStopTimer();
-  // Add extra time for reverb tail to finish
   stopTimer = window.setTimeout(() => {
     stopTimer = null;
     onDone();
-  }, (lastTime + RELEASE_DURATION + 2.5) * 1000);
+  }, loopDuration * 1000);
 }

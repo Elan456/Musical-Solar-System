@@ -16,11 +16,28 @@ import { stopAll, playEvents } from "./audio";
 import CustomBodyPanel from "./components/CustomBodyPanel";
 
 const API = "http://localhost:8000/api";
-const RENDERSCALE = 500;
+const RENDER_SCALE = 500;
+const CANVAS_SIZE = 500;
+const CANVAS_CENTER = CANVAS_SIZE / 2;
 
 const DEFAULT_PLANET_COLORS: Record<CustomBodyConfig["kind"], string> = {
-  rocky: "#aaaaaa",
+  rocky: "#a0a0a0",
   gas: "#4af4ff",
+};
+
+const getSimulationKey = (planets: BodyTemplate[]): string => {
+  // Only include properties that affect the physics simulation
+  return JSON.stringify(
+    planets.map((p) => ({
+      name: p.name,
+      mass: p.mass,
+      aAU: p.aAU,
+      radius: p.radius,
+      ellipticity: p.ellipticity,
+      position: p.position,
+      kind: p.kind, // affects mass calculation
+    }))
+  );
 };
 
 const computeMassFromConfig = (cfg: CustomBodyConfig): number => {
@@ -39,14 +56,7 @@ const ensurePlanetForPayload = (planet: BodyTemplate): BodyTemplate => {
     typeof rawMass === "number" && Number.isFinite(rawMass)
       ? rawMass
       : computeMassFromConfig({ kind, color, radius, ellipticity });
-  return {
-    ...planet,
-    kind,
-    radius,
-    color,
-    ellipticity,
-    mass,
-  };
+  return { ...planet, kind, radius, color, ellipticity, mass };
 };
 
 const defaultPreset: SystemPreset = {
@@ -65,16 +75,13 @@ type PlaybackConfig = {
 const App: React.FC = () => {
   const [system, setSystem] = useState<SystemPreset>(defaultPreset);
   const [data, setData] = useState<ComputeResponse | null>(null);
-  const [playbackConfig, setPlaybackConfig] =
-    useState<PlaybackConfig | null>(null);
+  const [playbackConfig, setPlaybackConfig] = useState<PlaybackConfig | null>(null);
   const [playing, setPlaying] = useState(false);
   const [playhead, setPlayhead] = useState(0);
   const [isComputing, setIsComputing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [selectedPlanetName, setSelectedPlanetName] = useState<string | null>(
-    null
-  );
+  const [selectedPlanetName, setSelectedPlanetName] = useState<string | null>(null);
   const [customBody, setCustomBody] = useState<CustomBodyConfig>({
     kind: "rocky",
     color: "#ffffff",
@@ -89,9 +96,7 @@ const App: React.FC = () => {
   const [predicting, setPredicting] = useState(false);
 
   const [isDragging, setIsDragging] = useState(false);
-  const [draggingPlanetName, setDraggingPlanetName] = useState<string | null>(
-    null
-  );
+  const [draggingPlanetName, setDraggingPlanetName] = useState<string | null>(null);
   const latestDraggedPlanetRef = useRef<BodyTemplate | null>(null);
 
   const rafRef = useRef<number | null>(null);
@@ -100,6 +105,7 @@ const App: React.FC = () => {
   const previewRequestRef = useRef(0);
   const audioLoopActiveRef = useRef(false);
   const playingRef = useRef(playing);
+  const loopDurationRef = useRef<number>(10);
 
   const hasSimData =
     !!data &&
@@ -130,12 +136,8 @@ const App: React.FC = () => {
       const planets = prev.planets.filter((_, i) => i !== index);
       return { ...prev, planets };
     });
-    setSelectedPlanetName((prev) =>
-      removedName && prev === removedName ? null : prev
-    );
-    setTrajectory((prev) =>
-      removedName && prev?.planetName === removedName ? null : prev
-    );
+    setSelectedPlanetName((prev) => (removedName && prev === removedName ? null : prev));
+    setTrajectory((prev) => (removedName && prev?.planetName === removedName ? null : prev));
   }, []);
 
   const syncCustomBodyToPlanet = useCallback((planet: BodyTemplate) => {
@@ -181,56 +183,55 @@ const App: React.FC = () => {
         musicMode: system.musicMode,
       };
     },
-    [
-      system.star,
-      system.planets,
-      system.durationSec,
-      system.dtSec,
-      system.musicMode,
-    ]
+    [system.star, system.planets, system.durationSec, system.dtSec, system.musicMode]
   );
 
-  const runSimulation = useCallback(async (payload: SystemPreset, requestId: number) => {
-    setIsComputing(true);
-    setError(null);
-    setPlaying(false);
-    stopAll();
-    playStartRef.current = null;
-    setPlayhead(0);
+  const runSimulation = useCallback(
+    async (payload: SystemPreset, requestId: number) => {
+      setIsComputing(true);
+      setError(null);
+      setPlaying(false);
+      stopAll();
+      playStartRef.current = null;
+      setPlayhead(0);
 
-    try {
-      const res = await fetch(`${API}/compute`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+      try {
+        const res = await fetch(`${API}/compute`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
 
-      if (!res.ok) {
-        throw new Error(`Server responded with ${res.status}`);
+        if (!res.ok) throw new Error(`Server responded with ${res.status}`);
+
+        const json: ComputeResponse = await res.json();
+        if (requestId !== computeRequestRef.current) return;
+
+        setData(json);
+        setPlaybackConfig({
+          durationSec: payload.durationSec,
+          dtSec: payload.dtSec,
+        });
+
+        // Store loop duration for audio sync
+        const samples = json.samples ?? [];
+        loopDurationRef.current = Math.max(samples.length * payload.dtSec, payload.durationSec);
+      } catch (err: any) {
+        console.error(err);
+        if (requestId !== computeRequestRef.current) return;
+        setError(err?.message ?? "Failed to run simulation");
+        setData(null);
+        setPlaybackConfig(null);
+      } finally {
+        if (requestId === computeRequestRef.current) setIsComputing(false);
       }
+    },
+    []
+  );
 
-      const json: ComputeResponse = await res.json();
-      if (requestId !== computeRequestRef.current) return;
+  const lastSimKeyRef = useRef<string>("");
 
-      setData(json);
-      setPlaybackConfig({
-        durationSec: payload.durationSec,
-        dtSec: payload.dtSec,
-      });
-    } catch (err: any) {
-      console.error(err);
-      if (requestId !== computeRequestRef.current) return;
-      setError(err?.message ?? "Failed to run simulation");
-      setData(null);
-      setPlaybackConfig(null);
-    } finally {
-      if (requestId === computeRequestRef.current) {
-        setIsComputing(false);
-      }
-    }
-  }, []);
 
-  // Main simulation recomputes on planet changes, except during drag.
   useEffect(() => {
     if (isDragging) return;
 
@@ -247,12 +248,19 @@ const App: React.FC = () => {
       return;
     }
 
+    // Check if simulation-relevant properties changed
+    const simKey = getSimulationKey(system.planets);
+    if (simKey === lastSimKeyRef.current) {
+      // Only visual properties changed (like color), skip resim
+      return;
+    }
+    lastSimKeyRef.current = simKey;
+
     const payload = buildSimulationPayload();
     const requestId = ++computeRequestRef.current;
     runSimulation(payload, requestId);
   }, [system.planets, buildSimulationPayload, runSimulation, isDragging]);
 
-  // Compute a trajectory line for a single planet using current system + override.
   const computeTrajectoryPreview = useCallback(
     async (planet: BodyTemplate) => {
       const requestId = ++previewRequestRef.current;
@@ -272,32 +280,22 @@ const App: React.FC = () => {
           body: JSON.stringify(payload),
         });
 
-        if (!res.ok) {
-          throw new Error(`Server responded with ${res.status}`);
-        }
+        if (!res.ok) throw new Error(`Server responded with ${res.status}`);
 
         const json: ComputeResponse = await res.json();
         if (previewRequestRef.current !== requestId) return;
 
         const points =
           json.samples
-            ?.map((sample) =>
-              sample.planets.find((p: Planet) => p.name === planet.name)
-            )
+            ?.map((sample) => sample.planets.find((p: Planet) => p.name === planet.name))
             .filter(Boolean)
             .map((p: Planet) => ({ x: p.x, y: p.y })) ?? [];
 
         setTrajectory({ planetName: planet.name, points });
       } catch (err) {
         console.error("Failed to compute trajectory preview", err);
-        if (previewRequestRef.current === requestId) {
-          // keep previous trajectory if you want, or clear:
-          // setTrajectory(null);
-        }
       } finally {
-        if (previewRequestRef.current === requestId) {
-          setPredicting(false);
-        }
+        if (previewRequestRef.current === requestId) setPredicting(false);
       }
     },
     [system.planets, buildSimulationPayload]
@@ -328,21 +326,20 @@ const App: React.FC = () => {
     setSelectedPlanetName(name);
     syncCustomBodyToPlanet(newPlanet);
     setTrajectory(null);
-
-    // Not dragging here, so safe to preview immediately.
     computeTrajectoryPreview(newPlanet);
-  }, [
-    customBody,
-    makeUniqueName,
-    system.planets.length,
-    syncCustomBodyToPlanet,
-    computeTrajectoryPreview,
-  ]);
+  }, [customBody, makeUniqueName, system.planets.length, syncCustomBodyToPlanet, computeTrajectoryPreview]);
 
   const handleCustomBodyChange = useCallback(
     (cfg: CustomBodyConfig) => {
       setCustomBody(cfg);
       if (!selectedPlanetName) return;
+
+      // Find current planet to check what changed
+      const currentPlanet = system.planets.find((p) => p.name === selectedPlanetName);
+      const onlyColorChanged = currentPlanet && 
+        currentPlanet.kind === cfg.kind &&
+        currentPlanet.radius === cfg.radius &&
+        currentPlanet.ellipticity === cfg.ellipticity;
 
       const mass = computeMassFromConfig(cfg);
       let updatedPlanet: BodyTemplate | null = null;
@@ -357,10 +354,7 @@ const App: React.FC = () => {
         return { ...prev, planets };
       });
 
-      // Preview only if not dragging.
-      if (updatedPlanet && !isDragging) {
-        computeTrajectoryPreview(updatedPlanet);
-      }
+      if (updatedPlanet && !isDragging && !onlyColorChanged) computeTrajectoryPreview(updatedPlanet);
     },
     [selectedPlanetName, computeTrajectoryPreview, isDragging]
   );
@@ -381,11 +375,18 @@ const App: React.FC = () => {
     playStartRef.current = null;
   }, []);
 
+  // Audio loop with proper sync
   const startAudioLoop = useCallback(() => {
     if (!data?.events?.length) return;
     audioLoopActiveRef.current = true;
-    playEvents(data.events, () => {
+
+    // Sync: reset playhead to 0 and record the start time
+    playStartRef.current = performance.now();
+    setPlayhead(0);
+
+    playEvents(data.events, loopDurationRef.current, () => {
       if (audioLoopActiveRef.current && playingRef.current) {
+        // Restart both audio and visual in sync
         startAudioLoop();
       }
     });
@@ -397,14 +398,12 @@ const App: React.FC = () => {
   }, [playing]);
 
   const handlePlay = useCallback(() => {
-    if (!data || !playbackConfig || isComputing) return;
-    if (!hasSimData) return;
-
-    startAudioLoop();
-    playStartRef.current = performance.now() - playhead * 1000;
+    if (!data || !playbackConfig || isComputing || !hasSimData) return;
     setPlaying(true);
-  }, [data, playbackConfig, isComputing, hasSimData, playhead, startAudioLoop]);
+    startAudioLoop();
+  }, [data, playbackConfig, isComputing, hasSimData, startAudioLoop]);
 
+  // Visual playhead animation
   useEffect(() => {
     if (!playing || !data || !playbackConfig || !hasSimData) {
       if (rafRef.current != null) {
@@ -416,19 +415,16 @@ const App: React.FC = () => {
 
     const samples: any[] = (data as any).samples;
     const dt = playbackConfig.dtSec;
-    const totalSamples = samples.length;
-    const totalDuration = Math.max(totalSamples * dt, playbackConfig.durationSec);
-
-    if (playStartRef.current == null) {
-      playStartRef.current = performance.now() - playhead * 1000;
-    }
+    const totalDuration = loopDurationRef.current;
 
     const tick = (now: number) => {
-      if (!playStartRef.current) return;
+      if (!playStartRef.current) {
+        playStartRef.current = now;
+      }
       const elapsedSec = (now - playStartRef.current) / 1000;
-      const wrapped =
-        ((elapsedSec % totalDuration) + totalDuration) % totalDuration;
-      setPlayhead(wrapped);
+      // Don't wrap here - let audio loop handle the restart
+      const clamped = Math.min(elapsedSec, totalDuration);
+      setPlayhead(clamped);
       rafRef.current = requestAnimationFrame(tick);
     };
 
@@ -440,7 +436,7 @@ const App: React.FC = () => {
         rafRef.current = null;
       }
     };
-  }, [playing, data, playbackConfig, hasSimData, playhead]);
+  }, [playing, data, playbackConfig, hasSimData]);
 
   const currentSample = useMemo(() => {
     if (!data || !hasSimData) return null;
@@ -450,21 +446,20 @@ const App: React.FC = () => {
     if (totalSamples === 0 || !Number.isFinite(dt) || dt <= 0) return null;
 
     const totalDuration = totalSamples * dt;
-    const t = ((playhead % totalDuration) + totalDuration) % totalDuration;
-    const idx = Math.min(totalSamples - 1, Math.floor(t / dt));
+    const t = Math.min(playhead, totalDuration - dt);
+    const idx = Math.min(totalSamples - 1, Math.max(0, Math.floor(t / dt)));
     return samples[idx] ?? null;
   }, [data, hasSimData, playbackConfig, system.dtSec, playhead]);
 
-  const renderScale = RENDERSCALE / 2;
+  const renderScale = RENDER_SCALE / 2;
 
   const getSimCoords = useCallback(
     (evt: React.MouseEvent<SVGSVGElement, MouseEvent>) => {
       const bounds = evt.currentTarget.getBoundingClientRect();
       const xPx = evt.clientX - bounds.left;
       const yPx = evt.clientY - bounds.top;
-      const center = 250;
-      const simX = (xPx - center) / renderScale;
-      const simY = (yPx - center) / renderScale;
+      const simX = (xPx - CANVAS_CENTER) / renderScale;
+      const simY = (yPx - CANVAS_CENTER) / renderScale;
       if (!Number.isFinite(simX) || !Number.isFinite(simY)) return null;
       return { simX, simY };
     },
@@ -483,30 +478,38 @@ const App: React.FC = () => {
       let { x, y, name, radius, color, kind } = p as any;
       if (typeof x !== "number" || typeof y !== "number") return null;
 
-      // While dragging, show the dragged planet at its edited position.
-      if (
-        draggingTemplate &&
-        name === draggingTemplate.name &&
-        draggingTemplate.position
-      ) {
+      if (draggingTemplate && name === draggingTemplate.name && draggingTemplate.position) {
         x = draggingTemplate.position[0];
         y = draggingTemplate.position[1];
       }
 
-      const cx = 250 + x * renderScale;
-      const cy = 250 + y * renderScale;
+      const cx = CANVAS_CENTER + x * renderScale;
+      const cy = CANVAS_CENTER + y * renderScale;
+      const isSelected = name === selectedPlanetName;
 
       return (
-        <circle
-          key={name}
-          cx={cx}
-          cy={cy}
-          r={radius ?? 6}
-          fill={color ?? (kind === "rocky" ? "#aaa" : "#4af")}
-        />
+        <g key={name}>
+          {isSelected && (
+            <circle
+              cx={cx}
+              cy={cy}
+              r={(radius ?? 6) + 4}
+              fill="none"
+              stroke="#fff"
+              strokeWidth={2}
+              opacity={0.6}
+            />
+          )}
+          <circle
+            cx={cx}
+            cy={cy}
+            r={radius ?? 6}
+            fill={color ?? (kind === "rocky" ? "#aaa" : "#4af")}
+          />
+        </g>
       );
     });
-  }, [currentSample, renderScale, draggingPlanetName, system.planets]);
+  }, [currentSample, renderScale, draggingPlanetName, system.planets, selectedPlanetName]);
 
   const findPlanetIndexAtEvent = useCallback(
     (evt: React.MouseEvent<SVGSVGElement, MouseEvent>) => {
@@ -515,13 +518,12 @@ const App: React.FC = () => {
       const bounds = evt.currentTarget.getBoundingClientRect();
       const xPx = evt.clientX - bounds.left;
       const yPx = evt.clientY - bounds.top;
-      const center = 250;
       const planets = currentSample.planets as Planet[];
 
       for (let i = planets.length - 1; i >= 0; i -= 1) {
         const planet = planets[i];
-        const px = center + (planet.x || 0) * renderScale;
-        const py = center + (planet.y || 0) * renderScale;
+        const px = CANVAS_CENTER + (planet.x || 0) * renderScale;
+        const py = CANVAS_CENTER + (planet.y || 0) * renderScale;
         const radius = (planet.radius ?? 6) + 4;
         const dx = xPx - px;
         const dy = yPx - py;
@@ -543,12 +545,9 @@ const App: React.FC = () => {
       const planet = system.planets[index];
       setSelectedPlanetName(planet.name);
       syncCustomBodyToPlanet(planet);
-
       setDraggingPlanetName(planet.name);
       setIsDragging(true);
       latestDraggedPlanetRef.current = planet;
-
-      // Cancel any in flight preview and hide the line while dragging.
       previewRequestRef.current += 1;
       setTrajectory(null);
     },
@@ -565,198 +564,404 @@ const App: React.FC = () => {
       const distance = Math.sqrt(simX * simX + simY * simY) || 0.01;
 
       setSystem((prev) => {
-        const idx = prev.planets.findIndex(
-          (p) => p.name === draggingPlanetName
-        );
+        const idx = prev.planets.findIndex((p) => p.name === draggingPlanetName);
         if (idx === -1) return prev;
 
         const planets = prev.planets.map((p, i) => {
           if (i !== idx) return p;
-          const next: BodyTemplate = {
-            ...p,
-            aAU: distance,
-            position: [simX, simY, 0],
-          };
+          const next: BodyTemplate = { ...p, aAU: distance, position: [simX, simY, 0] };
           latestDraggedPlanetRef.current = next;
           return next;
         });
 
         return { ...prev, planets };
       });
-      // No trajectory preview while dragging.
     },
     [isDragging, draggingPlanetName, getSimCoords]
   );
 
-  const stopDragging = useCallback(async () => {
+  const stopDragging = useCallback(() => {
     if (!isDragging) return;
 
     const finalPlanet = latestDraggedPlanetRef.current;
     setIsDragging(false);
     setDraggingPlanetName(null);
 
-    if (finalPlanet) {
-      computeTrajectoryPreview(finalPlanet);
-    }
+    if (finalPlanet) computeTrajectoryPreview(finalPlanet);
   }, [isDragging, computeTrajectoryPreview]);
 
-  const handleCanvasMouseUp = useCallback(() => {
-    stopDragging();
-  }, [stopDragging]);
+  const handleCanvasMouseUp = useCallback(() => stopDragging(), [stopDragging]);
+  const handleCanvasMouseLeave = useCallback(() => stopDragging(), [stopDragging]);
 
-  const handleCanvasMouseLeave = useCallback(() => {
-    stopDragging();
-  }, [stopDragging]);
-
-  const canPlay = !!data && !!playbackConfig && hasSimData && !isComputing;
+  const canPlay = !!data && !!playbackConfig && hasSimData && !isComputing && !playing;
   const canPause = playing;
   const canReset = !!data && hasSimData;
 
+  const totalDuration = loopDurationRef.current;
+  const progress = totalDuration > 0 ? (playhead / totalDuration) * 100 : 0;
+
   return (
-    <div style={{ display: "flex", height: "100vh" }}>
-      <div
-        style={{
-          width: 360,
-          padding: 16,
-          overflowY: "auto",
-          background: "#111",
-          color: "#f5f5f5",
-        }}
-      >
-        <h2>Custom Bodies</h2>
-        <p>
-          Click or drag any planet in the simulation to edit it here. Spawn a
-          new planet, then drag it to place it. The predicted trajectory appears
-          after you release the drag.
-        </p>
+    <div style={styles.container}>
+      {/* Header */}
+      <header style={styles.header}>
+        <h1 style={styles.title}>🪐 Musical Solar System</h1>
+        <p style={styles.subtitle}>Create planets and hear the music of their orbits</p>
+      </header>
 
-        <CustomBodyPanel
-          config={customBody}
-          onChange={handleCustomBodyChange}
-          selectedName={selectedPlanetName}
-          onSpawn={handleSpawnPlanet}
-          hasPending={false}
-          spawnPending={false}
-          predicting={predicting}
-        />
-
-        <h3 style={{ marginTop: 24 }}>Bodies</h3>
-        <p style={{ fontSize: 12, color: "#888" }}>
-          Click any body to tweak it, then drag it on the simulation to
-          reposition.
-        </p>
-
-        {system.planets.length === 0 && (
-          <p>No bodies yet. Use the controls above to add one.</p>
-        )}
-
-        {system.planets.map((planet, index) => (
-          <div
-            key={`${planet.name}-${index}`}
-            onClick={() => handleBodySelect(index)}
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              padding: "8px 0",
-              borderBottom: "1px solid #333",
-              cursor: "pointer",
-            }}
-            title="Click to edit this body"
-          >
-            <div>
-              <strong>{planet.name}</strong>{" "}
-              <span style={{ color: "#aaa" }}>{planet.kind}</span>
-              <div style={{ fontSize: 12, color: "#888" }}>
-                Orbit: {planet.aAU.toFixed(2)} AU • Color: {planet.color}
-              </div>
-              {planet.position && (
-                <div style={{ fontSize: 11, color: "#666" }}>
-                  Position: ({planet.position[0].toFixed(2)},{" "}
-                  {planet.position[1].toFixed(2)})
-                </div>
-              )}
-            </div>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                removePlanet(index);
-              }}
-            >
-              Remove
-            </button>
-          </div>
-        ))}
-
-        <div style={{ marginTop: 24, fontSize: 12, color: "#aaa" }}>
-          <div>Simulation auto updates (30 s window, dt 0.016 s).</div>
-          {isComputing && (
-            <div style={{ color: "#ddd", marginTop: 6 }}>
-              Simulating latest changes…
-            </div>
-          )}
-          {playbackConfig && !isComputing && (
-            <div style={{ marginTop: 6 }}>
-              Last simulation complete: duration {playbackConfig.durationSec}s,
-              dt {playbackConfig.dtSec}s
-            </div>
-          )}
-          {error && (
-            <p style={{ color: "salmon", marginTop: 8 }}>{error}</p>
-          )}
-        </div>
-      </div>
-
-      <div style={{ flex: 1 }}>
-        <div style={{ display: "flex", gap: 8, padding: 8 }}>
-          <button onClick={handlePlay} disabled={!canPlay}>
-            Play
-          </button>
-          <button onClick={handlePause} disabled={!canPause}>
-            Pause
-          </button>
-          <button onClick={handleReset} disabled={!canReset}>
-            Reset
-          </button>
-          {hasSimData && (
-            <div style={{ marginLeft: 16, color: "#ccc" }}>
-              t = {playhead.toFixed(2)} s
-            </div>
-          )}
-        </div>
-
-        <svg
-          width="500"
-          height="500"
-          style={{
-            background: "#222",
-            cursor: isDragging ? "grabbing" : "pointer",
-          }}
-          onMouseDown={handleCanvasMouseDown}
-          onMouseMove={handleCanvasMouseMove}
-          onMouseUp={handleCanvasMouseUp}
-          onMouseLeave={handleCanvasMouseLeave}
-        >
-          {trajectory?.points?.length ? (
-            <polyline
-              points={trajectory.points
-                .map(
-                  (pt) =>
-                    `${250 + pt.x * renderScale},${250 + pt.y * renderScale}`
-                )
-                .join(" ")}
-              stroke="#888"
-              strokeDasharray="4 6"
-              fill="none"
-              opacity={0.7}
+      <div style={styles.main}>
+        {/* Left Panel - Controls */}
+        <aside style={styles.sidebar}>
+          <section style={styles.section}>
+            <h2 style={styles.sectionTitle}>Create Body</h2>
+            <CustomBodyPanel
+              config={customBody}
+              onChange={handleCustomBodyChange}
+              selectedName={selectedPlanetName}
+              onSpawn={handleSpawnPlanet}
+              hasPending={false}
+              spawnPending={false}
+              predicting={predicting}
             />
-          ) : null}
+          </section>
 
-          {renderPlanets()}
-        </svg>
+          <section style={styles.section}>
+            <h2 style={styles.sectionTitle}>
+              Bodies ({system.planets.length})
+            </h2>
+            
+            {system.planets.length === 0 ? (
+              <p style={styles.emptyText}>
+                No bodies yet. Create one above and drag it into position.
+              </p>
+            ) : (
+              <div style={styles.planetList}>
+                {system.planets.map((planet, index) => (
+                  <div
+                    key={`${planet.name}-${index}`}
+                    onClick={() => handleBodySelect(index)}
+                    style={{
+                      ...styles.planetItem,
+                      ...(selectedPlanetName === planet.name ? styles.planetItemSelected : {}),
+                    }}
+                  >
+                    <div style={styles.planetInfo}>
+                      <div style={styles.planetHeader}>
+                        <span
+                          style={{
+                            ...styles.planetDot,
+                            backgroundColor: planet.color,
+                          }}
+                        />
+                        <strong style={styles.planetName}>{planet.name}</strong>
+                        <span style={styles.planetKind}>{planet.kind}</span>
+                      </div>
+                      <div style={styles.planetDetails}>
+                        Orbit: {planet.aAU.toFixed(2)} AU
+                        {planet.ellipticity > 0 && ` • Ellipticity: ${planet.ellipticity.toFixed(2)}`}
+                      </div>
+                    </div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removePlanet(index);
+                      }}
+                      style={styles.removeButton}
+                      title="Remove planet"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          {/* Status */}
+          <div style={styles.status}>
+            {isComputing && <span style={styles.statusComputing}>⏳ Simulating...</span>}
+            {error && <span style={styles.statusError}>{error}</span>}
+          </div>
+        </aside>
+
+        {/* Center - Simulation View */}
+        <main style={styles.simContainer}>
+          {/* Playback Controls */}
+          <div style={styles.controls}>
+            <button
+              onClick={handlePlay}
+              disabled={!canPlay}
+              style={{ ...styles.controlButton, ...(canPlay ? styles.playButton : {}) }}
+            >
+              ▶ Play
+            </button>
+            <button
+              onClick={handlePause}
+              disabled={!canPause}
+              style={styles.controlButton}
+            >
+              ⏸ Pause
+            </button>
+            <button
+              onClick={handleReset}
+              disabled={!canReset}
+              style={styles.controlButton}
+            >
+              ↺ Reset
+            </button>
+
+            {/* Time display */}
+            <div style={styles.timeDisplay}>
+              <span style={styles.timeText}>
+                {playhead.toFixed(1)}s / {totalDuration.toFixed(1)}s
+              </span>
+            </div>
+          </div>
+
+          {/* Progress bar */}
+          <div style={styles.progressContainer}>
+            <div style={{ ...styles.progressBar, width: `${progress}%` }} />
+          </div>
+
+          {/* Canvas */}
+          <svg
+            width={CANVAS_SIZE}
+            height={CANVAS_SIZE}
+            style={{
+              ...styles.canvas,
+              cursor: isDragging ? "grabbing" : "default",
+            }}
+            onMouseDown={handleCanvasMouseDown}
+            onMouseMove={handleCanvasMouseMove}
+            onMouseUp={handleCanvasMouseUp}
+            onMouseLeave={handleCanvasMouseLeave}
+          >
+            {/* Background stars */}
+            {[...Array(50)].map((_, i) => (
+              <circle
+                key={`star-${i}`}
+                cx={(i * 37) % CANVAS_SIZE}
+                cy={(i * 53) % CANVAS_SIZE}
+                r={Math.random() > 0.5 ? 1 : 0.5}
+                fill="#ffffff"
+                opacity={0.3 + (i % 5) * 0.1}
+              />
+            ))}
+
+            {/* Central star */}
+            <circle cx={CANVAS_CENTER} cy={CANVAS_CENTER} r={15} fill="#ffdd44" />
+            <circle cx={CANVAS_CENTER} cy={CANVAS_CENTER} r={20} fill="#ffdd44" opacity={0.3} />
+            <circle cx={CANVAS_CENTER} cy={CANVAS_CENTER} r={25} fill="#ffdd44" opacity={0.1} />
+
+            {/* Trajectory preview */}
+            {trajectory?.points?.length ? (
+              <polyline
+                points={trajectory.points
+                  .map((pt) => `${CANVAS_CENTER + pt.x * renderScale},${CANVAS_CENTER + pt.y * renderScale}`)
+                  .join(" ")}
+                stroke="#6688ff"
+                strokeDasharray="4 4"
+                fill="none"
+                opacity={0.6}
+                strokeWidth={1.5}
+              />
+            ) : null}
+
+            {/* Planets */}
+            {renderPlanets()}
+          </svg>
+
+          {/* Instructions */}
+          <p style={styles.instructions}>
+            Click a planet to select it • Drag to reposition • Adjust properties in the left panel
+          </p>
+        </main>
       </div>
     </div>
   );
+};
+
+const styles: Record<string, React.CSSProperties> = {
+  container: {
+    minHeight: "100vh",
+    backgroundColor: "#0a0a0f",
+    color: "#e0e0e0",
+    fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+  },
+  header: {
+    padding: "20px 32px",
+    borderBottom: "1px solid #1a1a2e",
+    background: "linear-gradient(180deg, #12121a 0%, #0a0a0f 100%)",
+  },
+  title: {
+    margin: 0,
+    fontSize: 28,
+    fontWeight: 600,
+    color: "#ffffff",
+  },
+  subtitle: {
+    margin: "4px 0 0",
+    fontSize: 14,
+    color: "#888",
+  },
+  main: {
+    display: "flex",
+    height: "calc(100vh - 85px)",
+  },
+  sidebar: {
+    width: 340,
+    padding: 20,
+    overflowY: "auto",
+    borderRight: "1px solid #1a1a2e",
+    backgroundColor: "#0d0d14",
+  },
+  section: {
+    marginBottom: 28,
+  },
+  sectionTitle: {
+    fontSize: 14,
+    fontWeight: 600,
+    textTransform: "uppercase",
+    letterSpacing: "0.05em",
+    color: "#888",
+    marginBottom: 12,
+  },
+  emptyText: {
+    fontSize: 13,
+    color: "#555",
+    fontStyle: "italic",
+  },
+  planetList: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+  },
+  planetItem: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "10px 12px",
+    borderRadius: 8,
+    backgroundColor: "#14141f",
+    cursor: "pointer",
+    transition: "background-color 0.15s",
+    border: "1px solid transparent",
+  },
+  planetItemSelected: {
+    backgroundColor: "#1a1a2e",
+    borderColor: "#3355aa",
+  },
+  planetInfo: {
+    flex: 1,
+  },
+  planetHeader: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+  },
+  planetDot: {
+    width: 10,
+    height: 10,
+    borderRadius: "50%",
+  },
+  planetName: {
+    fontSize: 14,
+    color: "#fff",
+  },
+  planetKind: {
+    fontSize: 11,
+    color: "#666",
+    textTransform: "capitalize",
+  },
+  planetDetails: {
+    fontSize: 11,
+    color: "#555",
+    marginTop: 4,
+    marginLeft: 18,
+  },
+  removeButton: {
+    background: "none",
+    border: "none",
+    color: "#555",
+    fontSize: 14,
+    cursor: "pointer",
+    padding: "4px 8px",
+    borderRadius: 4,
+    transition: "color 0.15s, background-color 0.15s",
+  },
+  status: {
+    fontSize: 12,
+    padding: "8px 0",
+  },
+  statusComputing: {
+    color: "#88aaff",
+  },
+  statusError: {
+    color: "#ff6666",
+  },
+  simContainer: {
+    flex: 1,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    padding: 24,
+    gap: 16,
+  },
+  controls: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+  },
+  controlButton: {
+    padding: "8px 16px",
+    fontSize: 13,
+    fontWeight: 500,
+    border: "1px solid #333",
+    borderRadius: 6,
+    backgroundColor: "#1a1a2e",
+    color: "#ccc",
+    cursor: "pointer",
+    transition: "all 0.15s",
+  },
+  playButton: {
+    backgroundColor: "#2244aa",
+    borderColor: "#3355cc",
+    color: "#fff",
+  },
+  timeDisplay: {
+    marginLeft: 16,
+    padding: "6px 12px",
+    backgroundColor: "#14141f",
+    borderRadius: 6,
+  },
+  timeText: {
+    fontSize: 13,
+    fontFamily: "monospace",
+    color: "#aaa",
+  },
+  progressContainer: {
+    width: CANVAS_SIZE,
+    height: 4,
+    backgroundColor: "#1a1a2e",
+    borderRadius: 2,
+    overflow: "hidden",
+  },
+  progressBar: {
+    height: "100%",
+    backgroundColor: "#4466cc",
+    borderRadius: 2,
+    transition: "width 0.1s linear",
+  },
+  canvas: {
+    backgroundColor: "#08080c",
+    borderRadius: 12,
+    border: "1px solid #1a1a2e",
+    boxShadow: "0 4px 24px rgba(0, 0, 0, 0.4)",
+  },
+  instructions: {
+    fontSize: 12,
+    color: "#555",
+    textAlign: "center",
+  },
 };
 
 export default App;
