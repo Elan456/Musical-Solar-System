@@ -76,11 +76,36 @@ def _radius_to_velocity(radius: float) -> float:
     velocity = v_max - norm * (v_max - v_min)
     return velocity
 
+def _calculate_eccentricity(min_r: float, max_r: float) -> float:
+    """
+    Calculate orbital eccentricity from min/max radius.
+    
+    e = (r_max - r_min) / (r_max + r_min)
+    
+    Circle: e = 0
+    Parabolic: e = 1
+    """
+    if max_r + min_r == 0:
+        return 0.0
+    return (max_r - min_r) / (max_r + min_r)
+
+
+def _eccentricity_to_reverb(eccentricity: float) -> float:
+    """
+    Map eccentricity (0-1) to reverb amount (0-1).
+    
+    Circular orbits (e≈0) -> dry (0.1)
+    Elliptical orbits (e≈1) -> wet (0.8)
+    """
+    min_reverb = 0.1
+    max_reverb = 0.8
+    return min_reverb + eccentricity * (max_reverb - min_reverb)
 
 def _note_events(
     planet: Dict[str, Any],
     t: float,
     all_orders: Dict[str, int],
+    all_eccentricities: Dict[str, float],
     speed: float | None = None,
 ) -> List[Dict[str, Any]]:
     """
@@ -94,16 +119,11 @@ def _note_events(
     radius = float(planet.get("radius") or RADIUS_RANGE[0])
     midi = get_note_from_order(all_orders[planet["name"]], max(all_orders.values()))
 
-    # Velocity from radius and speed
-    base_vel = 60 if instrument == "mallet" else 50
-    vel = base_vel
+    # Velocity from radius
+    base_vel = int(100 if instrument == "mallet" else 80)
+    vel = base_vel - int(_radius_to_velocity(radius) * 40)
+    vel = max(1, min(127, vel))
 
-    if speed is not None and speed > 0:
-        # Map speed into a small boost, clamped
-        speed_boost = min(speed * 10.0, 40.0)
-        vel = base_vel + int(speed_boost)
-
-    vel = max(30, min(vel, 127))
 
     # Duration: mallet is shorter, pad longer
     base_duration = NOTE_DURATION[instrument]
@@ -114,6 +134,11 @@ def _note_events(
     else:
         duration = base_duration
 
+    
+    # Reverb from eccentricity if available
+    eccentricity = all_eccentricities[planet["name"]]
+    reverb = _eccentricity_to_reverb(eccentricity)
+
     return [
         {
             "t": t,
@@ -122,6 +147,7 @@ def _note_events(
             "midi": midi,
             "vel": vel,
             "instrument": instrument,
+            "reverb": reverb,
         },
         {
             "t": t + duration,
@@ -139,6 +165,30 @@ def _wrapped_angle_diff(a: float, b: float) -> float:
     # Bring into [-pi, pi] using modulo arithmetic
     diff = (diff + math.pi) % (2.0 * math.pi) - math.pi
     return diff
+
+def _get_planets_min_max_radius(samples: List[Dict[str, Any]]) -> Dict[str, Tuple[float, float]]:
+    """
+    Calculate min and max radius for each planet across all samples.
+    Returns a dict mapping planet name to (min_radius, max_radius).
+    """
+    planet_radii: Dict[str, List[float]] = {}
+    for sample in samples:
+        for body in sample.get("planets", []):
+            if body.get("kind") == "star":
+                continue
+            name = body["name"]
+            x = float(body.get("x") or 0.0)
+            y = float(body.get("y") or 0.0)
+            r = math.sqrt(x * x + y * y)
+            if name not in planet_radii:
+                planet_radii[name] = []
+            planet_radii[name].append(r)
+    
+    planet_min_max: Dict[str, Tuple[float, float]] = {}
+    for name, radii in planet_radii.items():
+        planet_min_max[name] = (min(radii), max(radii))
+    
+    return planet_min_max
 
 def _planet_orbit_events(samples: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
@@ -170,6 +220,13 @@ def _planet_orbit_events(samples: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
     for order, planet in enumerate(planets_sorted):
         all_orders[planet["name"]] = order
+
+    all_eccentricities = {}
+    for planet in planets_sorted:
+        name = planet["name"]
+        min_r, max_r = _get_planets_min_max_radius(samples).get(name, (0.0, 0.0))
+        eccentricity = _calculate_eccentricity(min_r, max_r)
+        all_eccentricities[name] = eccentricity
 
     print(f"Assigned planet orders: {all_orders}")
 
@@ -243,7 +300,7 @@ def _planet_orbit_events(samples: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             if current_orbit > state["last_trigger_orbit"]:
                 # Completed an orbit! Emit note.
                 speed = float(body.get("speed") or 0.0)
-                events.extend(_note_events(body, t, all_orders, speed=speed))
+                events.extend(_note_events(body, t, all_orders, all_eccentricities, speed=speed))
                 state["last_trigger_orbit"] = current_orbit
 
     return events

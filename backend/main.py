@@ -51,6 +51,7 @@ class Event(BaseModel):
     midi: Optional[int] = None
     vel: Optional[int] = None
     instrument: Optional[str] = None
+    reverb: Optional[float] = None  # 0.0 = dry, 1.0 = full wet
 
 
 class ComputeResponse(BaseModel):
