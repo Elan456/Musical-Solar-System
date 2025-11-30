@@ -332,31 +332,66 @@ const App: React.FC = () => {
     if (!selectedPlanetName) return;
 
     const currentPlanet = system.planets.find((p) => p.name === selectedPlanetName);
-    
+
     // Check if only color changed (no physics change)
     const onlyColorChanged = currentPlanet &&
       currentPlanet.kind === cfg.kind &&
       currentPlanet.radius === cfg.radius &&
       currentPlanet.ellipticity === cfg.ellipticity;
 
+    // Check if type changed to update the name
+    const typeChanged = currentPlanet && currentPlanet.kind !== cfg.kind;
+
     const mass = computeMassFromConfig(cfg);
     let updatedPlanet: BodyTemplate | null = null;
+    let newName: string | null = null;
 
     setSystem((prev) => {
       const planets = prev.planets.map((planet) => {
         if (planet.name !== selectedPlanetName) return planet;
-        const next: BodyTemplate = { ...planet, ...cfg, mass };
+
+        let name = planet.name;
+        // Update name if type changed
+        if (typeChanged) {
+          const baseName = cfg.kind === "gas" ? "Gas Giant" : "Rocky Body";
+          // Extract the number from the current name if it exists
+          const match = planet.name.match(/(\d+)$/);
+          if (match) {
+            const num = match[1];
+            const candidate = `${baseName} ${num}`;
+            // Check if this name is available
+            const existing = new Set(prev.planets.map((p) => p.name));
+            existing.delete(planet.name); // Remove current planet from check
+            if (!existing.has(candidate)) {
+              name = candidate;
+            } else {
+              // Name collision, generate a unique name
+              name = makeUniqueName(baseName);
+            }
+          } else {
+            // No number in current name, generate unique name
+            name = makeUniqueName(baseName);
+          }
+          newName = name;
+        }
+
+        const next: BodyTemplate = { ...planet, ...cfg, mass, name };
         updatedPlanet = next;
         return next;
       });
       return { ...prev, planets };
     });
 
+    // Update selected planet name if it changed
+    if (newName) {
+      setSelectedPlanetName(newName);
+    }
+
     // Only recompute trajectory if physics changed
     if (updatedPlanet && !isDragging && !onlyColorChanged) {
       computeTrajectoryPreview(updatedPlanet);
     }
-  }, [selectedPlanetName, computeTrajectoryPreview, isDragging, system.planets]);
+  }, [selectedPlanetName, computeTrajectoryPreview, isDragging, system.planets, makeUniqueName]);
 
   // Sync panel when selection changes
   useEffect(() => {
