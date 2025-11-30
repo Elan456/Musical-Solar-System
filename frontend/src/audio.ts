@@ -260,7 +260,7 @@ export function playEvents(
 
       // Different gain staging for pads vs notes
       // Pads need much higher gain to be audible, modulation will vary the volume
-      const baseGain = isContinuous ? velocity * .1 : velocity * 0.35;
+      const baseGain = isContinuous ? velocity * .2 : velocity * 0.35;
       const peakGain = baseGain * frequencyCompensation;
 
       const reverbAmount = e.reverb ?? 0;

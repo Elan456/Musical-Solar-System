@@ -307,7 +307,8 @@ const App: React.FC = () => {
     const baseName = customBody.kind === "gas" ? "Gas Giant" : "Rocky Body";
     const name = makeUniqueName(baseName);
     const mass = computeMassFromConfig(customBody);
-    const orbit = 0.3 + system.planets.length * 0.15;
+    // Keep planets within visible range (max ~0.9 AU to stay on screen)
+    const orbit = 0.3 + (system.planets.length * 0.12) % 0.6;
 
     const newPlanet: BodyTemplate = {
       name,
@@ -655,7 +656,7 @@ const App: React.FC = () => {
         {/* Sidebar */}
         <aside style={styles.sidebar}>
           <section style={styles.section}>
-            <h2 style={styles.sectionTitle}>Create Body</h2>
+            <h2 style={styles.sectionTitle}>Create Planet</h2>
             <CustomBodyPanel
               config={customBody}
               onChange={handleCustomBodyChange}
@@ -668,11 +669,11 @@ const App: React.FC = () => {
           </section>
 
           <section style={styles.section}>
-            <h2 style={styles.sectionTitle}>Bodies ({system.planets.length})</h2>
-            
+            <h2 style={styles.sectionTitle}>Planets ({system.planets.length})</h2>
+
             {system.planets.length === 0 ? (
               <p style={styles.emptyText}>
-                No bodies yet. Create one above and drag it into position.
+                No planets yet. Create one above and drag it into position.
               </p>
             ) : (
               <div style={styles.planetList}>

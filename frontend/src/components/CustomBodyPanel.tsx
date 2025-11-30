@@ -44,7 +44,7 @@ export function CustomBodyPanel({
         background: "#181818",
       }}
     >
-      <h3>Body Editor</h3>
+      <h3>Planet Editor</h3>
       <p style={{ fontSize: 12, color: "#aaa" }}>
         Drag planets directly inside the simulation to move them. These controls always edit the planet you last dragged.
       </p>
@@ -56,11 +56,11 @@ export function CustomBodyPanel({
         style={{ width: "100%", marginBottom: 12 }}
         disabled={hasPending}
       >
-        Spawn New Body
+        Spawn New Planet
       </button>
       {spawnPending && !hasPending && (
         <p style={{ fontSize: 12, color: "#bbb", marginTop: -4, marginBottom: 12 }}>
-          Click and drag on the sim to place the new body.
+          Click and drag on the sim to place the new planet.
         </p>
       )}
       <label style={labelStyle}>
@@ -114,7 +114,7 @@ export function CustomBodyPanel({
       {predicting && <p style={{ fontSize: 12, color: "#bbb", marginTop: 8 }}>Predicting trajectory…</p>}
       {!predicting && hasPending && (
         <p style={{ fontSize: 12, color: "#bbb", marginTop: 8 }}>
-          Dragging… release to drop the body. You’ll see the estimated path while moving.
+          Dragging… release to drop the planet. You'll see the estimated path while moving.
         </p>
       )}
     </div>
