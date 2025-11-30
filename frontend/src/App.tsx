@@ -80,6 +80,7 @@ const App: React.FC = () => {
   // Playback state
   const [playing, setPlaying] = useState(false);
   const [playhead, setPlayhead] = useState(0);
+  const [blinkingPlanets, setBlinkingPlanets] = useState<Set<string>>(new Set());
   
   // UI state
   const [isComputing, setIsComputing] = useState(false);
@@ -403,18 +404,29 @@ const App: React.FC = () => {
 
   // ============ Playback ============
 
+  const handleNoteBlink = useCallback((planetName: string) => {
+    setBlinkingPlanets((prev) => new Set(prev).add(planetName));
+    setTimeout(() => {
+      setBlinkingPlanets((prev) => {
+        const next = new Set(prev);
+        next.delete(planetName);
+        return next;
+      });
+    }, 150); // 150ms blink duration
+  }, []);
+
   const startAudioLoop = useCallback(() => {
     if (!data?.events?.length) return;
     audioLoopActiveRef.current = true;
     playStartRef.current = performance.now();
     setPlayhead(0);
 
-    playEvents(data.events, loopDurationRef.current, () => {
+    playEvents(data.events, loopDurationRef.current, handleNoteBlink, () => {
       if (audioLoopActiveRef.current && playingRef.current) {
         startAudioLoop();
       }
     });
-  }, [data]);
+  }, [data, handleNoteBlink]);
 
   useEffect(() => {
     playingRef.current = playing;
@@ -600,6 +612,7 @@ const App: React.FC = () => {
       const cx = CANVAS_CENTER + x * renderScale;
       const cy = CANVAS_CENTER + y * renderScale;
       const isSelected = name === selectedPlanetName;
+      const isBlinking = blinkingPlanets.has(name);
 
       return (
         <g key={name}>
@@ -614,16 +627,29 @@ const App: React.FC = () => {
               opacity={0.6}
             />
           )}
+          {isBlinking && (
+            <circle
+              cx={cx}
+              cy={cy}
+              r={displayRadius + 8}
+              fill="none"
+              stroke="#ffffff"
+              strokeWidth={3}
+              opacity={0.8}
+            />
+          )}
           <circle
             cx={cx}
             cy={cy}
             r={displayRadius}
             fill={color}
+            opacity={isBlinking ? 1 : 0.85}
+            filter={isBlinking ? "brightness(1.5)" : undefined}
           />
         </g>
       );
     });
-  }, [currentSample, renderScale, draggingPlanetName, system.planets, selectedPlanetName, planetVisuals]);
+  }, [currentSample, renderScale, draggingPlanetName, system.planets, selectedPlanetName, planetVisuals, blinkingPlanets]);
 
   // Static background stars (memoized to prevent re-randomizing)
   const backgroundStars = useMemo(() => {

@@ -183,6 +183,7 @@ function buildGainCurve(
 export function playEvents(
   events: Event[],
   loopDuration: number,
+  onNoteBlink: (planetName: string) => void,
   onDone: () => void
 ) {
   console.log(`Playing ${events.length} events over ${loopDuration.toFixed(2)} sec`);
@@ -390,6 +391,12 @@ export function playEvents(
       };
 
       osc.start(startTime);
+
+      // Trigger blink callback for non-continuous notes
+      if (!isContinuous) {
+        const blinkDelay = (startTime - audioCtx.currentTime) * 1000;
+        setTimeout(() => onNoteBlink(e.planet), Math.max(0, blinkDelay));
+      }
     }
 
     if (e.type === "note_off") {
