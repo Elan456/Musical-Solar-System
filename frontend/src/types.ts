@@ -15,7 +15,6 @@ export type SystemPreset = {
   planets: BodyTemplate[];
   durationSec: number;
   dtSec: number;
-  musicMode: "per_orbit_note" | "continuous_tone";
 };
 
 export type CustomBodyConfig = Pick<
@@ -50,6 +49,9 @@ export type Event = {
   midi?: number;
   vel?: number;
   instrument?: string;
+  reverb?: number;
+  velocityEnvelope?: { t: number; velocity: number }[];
+  continuous?: boolean;
 };
 
 export type ComputeResponse = {
