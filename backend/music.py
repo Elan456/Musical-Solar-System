@@ -63,17 +63,18 @@ def get_note_from_order(order: int, max_order: int) -> int:
 def _radius_to_velocity(radius: float) -> float:
     """
     Map a planet radius to a velocity for musical purposes.
-    Larger radius -> lower velocity (slower orbit)
+    Larger radius -> higher velocity (for volume calculation)
+    Smaller radius -> lower velocity (quieter, closer planets)
     """
     r_min, r_max = RADIUS_RANGE
     v_min, v_max = 0.1, 1.0  # arbitrary velocity range
     if radius < r_min:
-        return v_max
-    if radius > r_max:
         return v_min
-    # Invert mapping: larger radius = smaller velocity
+    if radius > r_max:
+        return v_max
+    # Direct mapping: larger radius = larger velocity value
     norm = (radius - r_min) / (r_max - r_min)
-    velocity = v_max - norm * (v_max - v_min)
+    velocity = v_min + norm * (v_max - v_min)
     return velocity
 
 def _calculate_eccentricity(min_r: float, max_r: float) -> float:

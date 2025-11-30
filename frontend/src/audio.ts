@@ -251,9 +251,21 @@ export function playEvents(
       const noteGain = audioCtx.createGain();
       const velocity = (e.vel ?? 100) / 127;
 
+      // Apply frequency-dependent volume compensation
+      // Higher frequencies sound louder to human ears (Fletcher-Munson curves)
+      // Reduce gain for higher MIDI notes to create perceived equal loudness
+      const midpoint = 60; // Middle C as reference
+      const frequencyCompensation = 1.0 - Math.max(0, (e.midi - midpoint) / 24);
+
+      console.log("Applying frequency compensation:", {
+        midi: e.midi,
+        frequencyCompensation: frequencyCompensation.toFixed(3),
+      });
+
       // Different gain staging for pads vs notes
       // Pads need much higher gain to be audible, modulation will vary the volume
-      const peakGain = isContinuous ? velocity * .1 : velocity * 0.35;
+      const baseGain = isContinuous ? velocity * .1 : velocity * 0.35;
+      const peakGain = baseGain * frequencyCompensation;
 
       const reverbAmount = e.reverb ?? 0;
 
