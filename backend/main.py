@@ -43,6 +43,11 @@ class Sample(BaseModel):
     planets: List[dict]
 
 
+class VelocityPoint(BaseModel):
+    t: float
+    velocity: float
+
+
 class Event(BaseModel):
     t: float
     type: Literal["note_on", "note_off"]
@@ -51,6 +56,9 @@ class Event(BaseModel):
     vel: Optional[int] = None
     instrument: Optional[str] = None
     reverb: Optional[float] = None  # 0.0 = dry, 1.0 = full wet
+    continuous: Optional[bool] = None
+    velocityEnvelope: Optional[List[VelocityPoint]] = None
+    eccentricity: Optional[float] = None
 
 
 class ComputeResponse(BaseModel):

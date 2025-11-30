@@ -64,7 +64,6 @@ const defaultPreset: SystemPreset = {
   planets: [],
   durationSec: 10,
   dtSec: 0.016,
-  musicMode: "rich",
 };
 
 type PlaybackConfig = {

@@ -7,13 +7,19 @@ let compressor: DynamicsCompressorNode | null = null;
 let convolver: ConvolverNode | null = null;
 let reverbGain: GainNode | null = null;
 
+// Separate buses for pads and notes for better mix control
+let padBus: GainNode | null = null;
+let noteBus: GainNode | null = null;
+
 interface ScheduledNote {
   osc: OscillatorNode;
   gain: GainNode;
   dryGain: GainNode;
   wetGain: GainNode;
+  filter?: BiquadFilterNode;
   peakGain: number;
   startTime: number;
+  continuous?: boolean;
 }
 
 let allNotes = new Set<ScheduledNote>();
@@ -31,10 +37,6 @@ function clearStopTimer() {
   }
 }
 
-/**
- * Generate a synthetic impulse response for reverb.
- * Creates a decaying noise buffer that simulates room reflections.
- */
 function createImpulseResponse(
   audioCtx: AudioContext,
   duration: number = 2.5,
@@ -43,45 +45,49 @@ function createImpulseResponse(
   const sampleRate = audioCtx.sampleRate;
   const length = sampleRate * duration;
   const buffer = audioCtx.createBuffer(2, length, sampleRate);
-  
+
   for (let channel = 0; channel < 2; channel++) {
     const channelData = buffer.getChannelData(channel);
     for (let i = 0; i < length; i++) {
-      // White noise with exponential decay
       const envelope = Math.pow(1 - i / length, decay);
       channelData[i] = (Math.random() * 2 - 1) * envelope;
     }
   }
-  
+
   return buffer;
 }
 
 function getContext(): AudioContext {
   if (!ctx) {
     ctx = new AudioContext();
-    
-    // Compressor at the end of the chain
+
     compressor = ctx.createDynamicsCompressor();
-    compressor.threshold.value = -20;
-    compressor.knee.value = 40;
-    compressor.ratio.value = 8;
-    compressor.attack.value = 0.005;
-    compressor.release.value = 0.2;
+    compressor.threshold.value = -18;
+    compressor.knee.value = 30;
+    compressor.ratio.value = 6;
+    compressor.attack.value = 0.003;
+    compressor.release.value = 0.15;
     compressor.connect(ctx.destination);
-    
-    // Master gain before compressor
+
     masterGain = ctx.createGain();
-    masterGain.gain.value = 0.35;
+    masterGain.gain.value = 0.4;
     masterGain.connect(compressor);
-    
-    // Reverb send bus
+
+    // Create separate buses for pads and notes
+    padBus = ctx.createGain();
+    padBus.gain.value = 0.5; // Increased from 0.35 for better audibility
+    padBus.connect(masterGain);
+
+    noteBus = ctx.createGain();
+    noteBus.gain.value = 1.0; // Notes at full level
+    noteBus.connect(masterGain);
+
     convolver = ctx.createConvolver();
     convolver.buffer = createImpulseResponse(ctx, 2.5, 2.0);
-    
-    // Reverb return gain (controls overall reverb level)
+
     reverbGain = ctx.createGain();
-    reverbGain.gain.value = 0.7;
-    
+    reverbGain.gain.value = 0.6;
+
     convolver.connect(reverbGain);
     reverbGain.connect(masterGain);
   }
@@ -90,12 +96,12 @@ function getContext(): AudioContext {
 
 export function stopAll() {
   const now = ctx?.currentTime ?? 0;
-  
+
   allNotes.forEach((note) => {
     try {
       note.gain.gain.cancelScheduledValues(now);
       note.gain.gain.setTargetAtTime(0, now, 0.05);
-      note.osc.stop(now + 0.3);
+      note.osc.stop(now + 0.5);
     } catch {
       // ignore
     }
@@ -105,68 +111,254 @@ export function stopAll() {
   clearStopTimer();
 }
 
-export function playEvents(events: Event[], loopDuration: number, onDone: () => void) {
+/**
+ * Build a gain curve array for setValueCurveAtTime from velocity envelope
+ * 
+ * velocityEnvelope contains values from 0.2 to 1.0 (normalized orbital speed)
+ * We map these directly to the gain range for maximum dynamic expression
+ */
+function buildGainCurve(
+  velocityEnvelope: { t: number; velocity: number }[],
+  duration: number,
+  minGain: number,
+  maxGain: number,
+  sampleRate: number = 100
+): Float32Array {
+  const numSamples = Math.max(2, Math.floor(duration * sampleRate));
+  const curve = new Float32Array(numSamples);
+
+  if (!velocityEnvelope.length) {
+    curve.fill((minGain + maxGain) / 2);
+    return curve;
+  }
+
+  const sorted = [...velocityEnvelope].sort((a, b) => a.t - b.t);
+  
+  // Find the actual min/max velocity in the envelope for proper normalization
+  let envMin = 1, envMax = 0;
+  for (const p of sorted) {
+    if (p.velocity < envMin) envMin = p.velocity;
+    if (p.velocity > envMax) envMax = p.velocity;
+  }
+  const envRange = envMax - envMin;
+
+  for (let i = 0; i < numSamples; i++) {
+    const t = (i / (numSamples - 1)) * duration;
+
+    let prevPoint = sorted[0];
+    let nextPoint = sorted[sorted.length - 1];
+
+    for (let j = 0; j < sorted.length - 1; j++) {
+      if (sorted[j].t <= t && sorted[j + 1].t >= t) {
+        prevPoint = sorted[j];
+        nextPoint = sorted[j + 1];
+        break;
+      }
+    }
+
+    let velocity: number;
+    if (prevPoint.t === nextPoint.t) {
+      velocity = prevPoint.velocity;
+    } else {
+      const ratio = (t - prevPoint.t) / (nextPoint.t - prevPoint.t);
+      velocity = prevPoint.velocity + ratio * (nextPoint.velocity - prevPoint.velocity);
+    }
+
+    // Normalize velocity to 0-1 based on actual envelope range
+    // This ensures we use the full minGain to maxGain range
+    const normalized = envRange > 0.01 
+      ? (velocity - envMin) / envRange 
+      : 0.5;
+    
+    // Map directly to gain range (no exponential compression)
+    const gain = minGain + normalized * (maxGain - minGain);
+    curve[i] = Math.max(0.001, gain);
+  }
+  
+  console.log(`[CURVE] samples=${numSamples}, envRange=${envMin.toFixed(2)}-${envMax.toFixed(2)}, gainRange=${minGain.toFixed(4)}-${maxGain.toFixed(4)}`);
+
+  return curve;
+}
+
+export function playEvents(
+  events: Event[],
+  loopDuration: number,
+  onDone: () => void
+) {
+  console.log(`Playing ${events.length} events over ${loopDuration.toFixed(2)} sec`);
+
+  // Debug: show ALL events with their raw structure
+  console.log('[DEBUG] All events:', JSON.stringify(events.slice(0, 5), null, 2));
+
+  // Debug: show continuous events
+  const continuousEvents = events.filter(e => (e as any).continuous === true);
+  console.log(`[DEBUG] Continuous check: found ${continuousEvents.length} continuous events out of ${events.length} total`);
+
+  if (continuousEvents.length > 0) {
+    console.log(`[DEBUG] Continuous events:`, continuousEvents);
+  }
+
   if (!events?.length) {
     onDone();
     return;
   }
 
   const audioCtx = getContext();
-  
+
   if (audioCtx.state === "suspended") {
     audioCtx.resume();
   }
 
   stopAll();
 
-  const ATTACK = 0.04;
-  const RELEASE_TC = 0.08;
-  const RELEASE_DURATION = RELEASE_TC * 5;
+  // Rocky planet envelope timings
+  const ATTACK = 0.02;
+  const RELEASE_TC = 0.12; // Longer release to avoid pops
+  
+  // Gas planet pad timings
+  const PAD_ATTACK = 0.3;
+  const PAD_RELEASE_TC = 0.3;
+  
+  // Use a small but not tiny value for "silent"
+  const SILENT = 0.0001;
 
   events.forEach((e) => {
     if (e.type === "note_on" && e.midi !== undefined) {
       const startTime = audioCtx.currentTime + (e.t || 0);
+      const isContinuous = (e as any).continuous === true;
+      const velocityEnvelope = (e as any).velocityEnvelope as
+        | { t: number; velocity: number }[]
+        | undefined;
+      const eccentricity = (e as any).eccentricity as number | undefined;
+
+      // Debug logging for continuous events
+      if (isContinuous) {
+        console.log(`[CONTINUOUS EVENT] planet=${e.planet}, midi=${e.midi}, hasEnvelope=${!!velocityEnvelope}, envelopeLength=${velocityEnvelope?.length ?? 0}`);
+      }
 
       const osc = audioCtx.createOscillator();
       osc.frequency.value = midiToFreq(e.midi);
-      osc.type = e.instrument === "mallet" ? "sine" : "triangle";
 
-      // Main envelope gain
+      // Different oscillator setup for pads vs notes
+      if (isContinuous) {
+        osc.type = "sine";
+        // Slight detune for warmth
+        osc.detune.value = Math.random() * 8 - 4;
+      } else {
+        osc.type = e.instrument === "mallet" ? "sine" : "triangle";
+      }
+
       const noteGain = audioCtx.createGain();
-      
       const velocity = (e.vel ?? 100) / 127;
-      const peakGain = velocity * 0.2;
-      
-      noteGain.gain.setValueAtTime(0, startTime);
-      noteGain.gain.setTargetAtTime(peakGain, startTime, ATTACK / 3);
 
-      // Dry/wet routing for reverb
+      // Different gain staging for pads vs notes
+      // Pads need much higher gain to be audible, modulation will vary the volume
+      const peakGain = isContinuous ? velocity * 1.2 : velocity * 0.35;
+
       const reverbAmount = e.reverb ?? 0;
-      
-      // Dry signal (direct to master)
-      const dryGain = audioCtx.createGain();
-      dryGain.gain.value = 1 - reverbAmount * 0.5; // Keep some dry even at max reverb
-      
-      // Wet signal (to convolver)
-      const wetGain = audioCtx.createGain();
-      wetGain.gain.value = reverbAmount;
 
-      // Connect the chain:
-      // osc -> noteGain -> dryGain -> masterGain
-      //                 -> wetGain -> convolver -> reverbGain -> masterGain
+      const dryGain = audioCtx.createGain();
+      dryGain.gain.value = 1 - reverbAmount * 0.4;
+
+      const wetGain = audioCtx.createGain();
+      wetGain.gain.value = reverbAmount * 0.8;
+
+      // Build the signal chain
       osc.connect(noteGain);
-      noteGain.connect(dryGain);
-      noteGain.connect(wetGain);
-      dryGain.connect(masterGain!);
+      
+      let outputNode: AudioNode = noteGain;
+      let filterNode: BiquadFilterNode | undefined;
+      
+      // Add a low-pass filter to pads to keep them warm and out of the way
+      if (isContinuous) {
+        filterNode = audioCtx.createBiquadFilter();
+        filterNode.type = "lowpass";
+        filterNode.frequency.value = 1200; // Raised from 800 for more presence
+        filterNode.Q.value = 0.5;
+        noteGain.connect(filterNode);
+        outputNode = filterNode;
+      }
+      
+      outputNode.connect(dryGain);
+      outputNode.connect(wetGain);
+      
+      // Route to appropriate bus
+      const targetBus = isContinuous ? padBus! : noteBus!;
+      dryGain.connect(targetBus);
       wetGain.connect(convolver!);
 
-      const note: ScheduledNote = { 
-        osc, 
-        gain: noteGain, 
-        dryGain, 
-        wetGain, 
-        peakGain, 
-        startTime 
+      if (isContinuous && velocityEnvelope && velocityEnvelope.length > 1) {
+        console.log("Handling continuous pad with velocity envelope:", velocityEnvelope);
+        // === CONTINUOUS PAD WITH VELOCITY MODULATION ===
+        const ecc = eccentricity ?? 0;
+
+        // Strong modulation depth based on eccentricity
+        // Circular orbits (ecc ~0) get subtle modulation
+        // Elliptical orbits (ecc ~0.5+) get dramatic swells
+        // Range: 0.5 (circular) to 0.9 (highly elliptical)
+        const modulationDepth = 0.5 + ecc * 0.4;
+
+        // Wide gain range for audible dynamics
+        // minGain is quiet but audible, maxGain is full volume
+        const minGain = peakGain * (1 - modulationDepth);
+        const maxGain = peakGain;
+
+        // CRITICAL: Use loopDuration for the curve, not the envelope's max time
+        // This ensures the curve ends exactly when the loop ends
+        const curveDuration = loopDuration - PAD_ATTACK;
+
+        const gainCurve = buildGainCurve(
+          velocityEnvelope,
+          loopDuration,
+          minGain,
+          maxGain,
+          60 // Slightly higher sample rate for smoother curves
+        );
+
+        // Start silent and fade in
+        noteGain.gain.setValueAtTime(SILENT, startTime);
+        noteGain.gain.linearRampToValueAtTime(gainCurve[0], startTime + PAD_ATTACK);
+
+        // Apply the velocity-modulated curve using multiple setValueAtTime points
+        // This is more reliable than setValueCurveAtTime which can fail silently
+        const AUTOMATION_RATE = 0.05; // Update every 50ms for smooth modulation
+        const numAutomationPoints = Math.floor(curveDuration / AUTOMATION_RATE);
+
+        for (let i = 0; i < numAutomationPoints; i++) {
+          const t = i * AUTOMATION_RATE;
+          const curveIndex = Math.floor((t / curveDuration) * (gainCurve.length - 1));
+          const gainValue = gainCurve[curveIndex];
+          noteGain.gain.setValueAtTime(gainValue, startTime + PAD_ATTACK + t);
+        }
+
+        console.log(
+          `[PAD] ${e.planet}: ecc=${ecc.toFixed(2)}, ` +
+          `depth=${modulationDepth.toFixed(2)}, ` +
+          `gain=${minGain.toFixed(4)}-${maxGain.toFixed(4)}, ` +
+          `automationPoints=${numAutomationPoints}, ` +
+          `startTime=${(startTime + PAD_ATTACK).toFixed(2)}, curveDuration=${curveDuration.toFixed(2)}`
+        );
+      } else if (isContinuous) {
+        // Continuous but circular orbit - gentle steady drone
+        console.log(`[PAD-STEADY] ${e.planet}: circular orbit, steady drone`);
+        noteGain.gain.setValueAtTime(SILENT, startTime);
+        noteGain.gain.linearRampToValueAtTime(peakGain, startTime + PAD_ATTACK);
+      } else {
+        // === REGULAR NOTE (ROCKY PLANET) ===
+        // Use linear ramps for attack to avoid exponential curve issues at zero
+        noteGain.gain.setValueAtTime(0, startTime);
+        noteGain.gain.linearRampToValueAtTime(peakGain, startTime + ATTACK);
+      }
+
+      const note: ScheduledNote = {
+        osc,
+        gain: noteGain,
+        dryGain,
+        wetGain,
+        filter: filterNode,
+        peakGain,
+        startTime,
+        continuous: isContinuous,
       };
       allNotes.add(note);
       const bucket = (notesByPlanet[e.planet] ||= []);
@@ -177,6 +369,7 @@ export function playEvents(events: Event[], loopDuration: number, onDone: () => 
         noteGain.disconnect();
         dryGain.disconnect();
         wetGain.disconnect();
+        filterNode?.disconnect();
       };
 
       osc.start(startTime);
@@ -187,21 +380,27 @@ export function playEvents(events: Event[], loopDuration: number, onDone: () => 
       if (bucket && bucket.length > 0) {
         const note = bucket.shift()!;
         const stopTime = audioCtx.currentTime + (e.t || 0);
+        const releaseTC = note.continuous ? PAD_RELEASE_TC : RELEASE_TC;
 
         try {
+          // Cancel any scheduled automation from this point forward
           note.gain.gain.cancelScheduledValues(stopTime);
-          note.gain.gain.setTargetAtTime(0, stopTime, RELEASE_TC);
           
-          // Stop oscillator after release + extra time for reverb tail
-          note.osc.stop(stopTime + RELEASE_DURATION + 1.0);
+          // IMPORTANT: Don't use setValueAtTime here - it causes discontinuity
+          // setTargetAtTime will start from whatever the current value is
+          // and smoothly decay to near-zero
+          note.gain.gain.setTargetAtTime(0.0001, stopTime, releaseTC);
+
+          // Stop the oscillator well after the release has completed
+          // Use 6x time constant to reach ~99.75% of decay
+          const stopDelay = releaseTC * 6 + 0.1;
+          note.osc.stop(stopTime + stopDelay);
         } catch {
-          // already stopped
+          // Already stopped
         }
       }
     }
   });
-
-  const lastTime = events.reduce((max, e) => Math.max(max, e.t || 0), 0);
 
   clearStopTimer();
   stopTimer = window.setTimeout(() => {
