@@ -469,7 +469,6 @@ def _planet_orbit_events(samples: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 def events_for_system(
     samples: List[Dict[str, Any]],
     duration_sec: float,
-    music_mode: str,
 ) -> List[Dict[str, Any]]:
     """
     Generate musical events for a simulated system.
