@@ -211,9 +211,9 @@ export function playEvents(
 
   stopAll();
 
-  // Rocky planet envelope timings
-  const ATTACK = 0.02;
-  const RELEASE_TC = 0.12; // Longer release to avoid pops
+  // Rocky planet envelope timings - warmer piano-like sound
+  const ATTACK = 0.035; // Slightly slower attack for warmth
+  const RELEASE_TC = 0.18; // Longer release for piano-like sustain
   
   // Gas planet pad timings
   const PAD_ATTACK = 0.3;
@@ -245,7 +245,8 @@ export function playEvents(
         // Slight detune for warmth
         osc.detune.value = Math.random() * 8 - 4;
       } else {
-        osc.type = e.instrument === "mallet" ? "sine" : "triangle";
+        // Use sine wave for warmer, piano-like tone
+        osc.type = "sine";
       }
 
       const noteGain = audioCtx.createGain();
@@ -256,11 +257,6 @@ export function playEvents(
       // Reduce gain for higher MIDI notes to create perceived equal loudness
       const midpoint = 60; // Middle C as reference
       const frequencyCompensation = 1.0 - Math.max(0, (e.midi - midpoint) / 24);
-
-      console.log("Applying frequency compensation:", {
-        midi: e.midi,
-        frequencyCompensation: frequencyCompensation.toFixed(3),
-      });
 
       // Different gain staging for pads vs notes
       // Pads need much higher gain to be audible, modulation will vary the volume
@@ -277,20 +273,29 @@ export function playEvents(
 
       // Build the signal chain
       osc.connect(noteGain);
-      
+
       let outputNode: AudioNode = noteGain;
       let filterNode: BiquadFilterNode | undefined;
-      
-      // Add a low-pass filter to pads to keep them warm and out of the way
+
+      // Add low-pass filter for warmth
       if (isContinuous) {
+        // Pads: keep them warm and out of the way
         filterNode = audioCtx.createBiquadFilter();
         filterNode.type = "lowpass";
         filterNode.frequency.value = 1200; // Raised from 800 for more presence
         filterNode.Q.value = 0.5;
         noteGain.connect(filterNode);
         outputNode = filterNode;
+      } else {
+        // Rocky notes: add warmth with gentle low-pass filter for piano-like tone
+        filterNode = audioCtx.createBiquadFilter();
+        filterNode.type = "lowpass";
+        filterNode.frequency.value = 2800; // Filters out harsh upper harmonics
+        filterNode.Q.value = 0.7; // Slight resonance for character
+        noteGain.connect(filterNode);
+        outputNode = filterNode;
       }
-      
+
       outputNode.connect(dryGain);
       outputNode.connect(wetGain);
       
