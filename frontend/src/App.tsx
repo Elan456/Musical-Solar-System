@@ -581,6 +581,9 @@ const App: React.FC = () => {
       let { x, y, name, radius } = p;
       if (typeof x !== "number" || typeof y !== "number") return null;
 
+      // Skip rendering the star since we have a static one
+      if (name === "Star") return null;
+
       // Use position from drag if currently dragging this planet
       if (draggingTemplate?.name === name && draggingTemplate.position) {
         x = draggingTemplate.position[0];
