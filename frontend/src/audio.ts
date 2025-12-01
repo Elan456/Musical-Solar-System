@@ -84,6 +84,7 @@ function getContext(): AudioContext {
     noteBus.connect(masterGain);
 
     convolver = ctx.createConvolver();
+    convolver.normalize = false; // Disable normalization to preserve reverb level
     convolver.buffer = createImpulseResponse(ctx, 2.5, 2.0);
 
     reverbGain = ctx.createGain();
@@ -272,10 +273,18 @@ export function playEvents(
       const reverbAmount = e.reverb ?? 0;
 
       const dryGain = audioCtx.createGain();
-      dryGain.gain.value = 1 - reverbAmount * 0.4;
+      // For non-continuous notes, use reverb amount to control dry/wet balance
+      // At reverb=0: 100% dry, 0% wet
+      // At reverb=1: 20% dry, 80% wet (much more reverb)
+      dryGain.gain.value = isContinuous ? 1.0 : (1 - reverbAmount * 0.8);
 
       const wetGain = audioCtx.createGain();
-      wetGain.gain.value = reverbAmount * 0.8;
+      wetGain.gain.value = reverbAmount;
+
+      // Debug reverb setup for non-continuous notes
+      if (!isContinuous) {
+        console.log(`[REVERB SETUP] ${e.planet}: reverb=${reverbAmount.toFixed(3)}, dry=${dryGain.gain.value.toFixed(3)}, wet=${wetGain.gain.value.toFixed(3)}, convolver=${!!convolver}, convolverBuffer=${!!convolver?.buffer}`);
+      }
 
       // Build the signal chain
       osc.connect(noteGain);
@@ -303,12 +312,16 @@ export function playEvents(
       }
 
       outputNode.connect(dryGain);
-      outputNode.connect(wetGain);
-      
+
       // Route to appropriate bus
       const targetBus = isContinuous ? padBus! : noteBus!;
       dryGain.connect(targetBus);
-      wetGain.connect(convolver!);
+
+      // Only apply reverb to non-continuous notes (rocky planets)
+      if (!isContinuous) {
+        outputNode.connect(wetGain);
+        wetGain.connect(convolver!);
+      }
 
       if (isContinuous && velocityEnvelope && velocityEnvelope.length > 1) {
         console.log("Handling continuous pad with velocity envelope:", velocityEnvelope);
