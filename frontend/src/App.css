@@ -218,3 +218,58 @@
   color: #555;
   text-align: center;
 }
+
+.simulation-controls__status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  min-width: 180px;
+  background: rgba(34, 68, 170, 0.12);
+  border: 1px solid rgba(68, 102, 204, 0.3);
+  color: #dbe8ff;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.simulation-controls__spinner {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.12);
+  border-top-color: #6dd6ff;
+  animation: spin 0.8s linear infinite;
+}
+
+.simulation-controls__status-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #6dd6ff;
+  box-shadow: 0 0 0 6px rgba(109, 214, 255, 0.08);
+}
+
+.simulation-controls__status--ready {
+  background: rgba(50, 200, 150, 0.12);
+  border-color: rgba(80, 220, 170, 0.3);
+  color: #c9ffed;
+}
+
+.simulation-controls__status--ready .simulation-controls__status-dot {
+  background: #6cffc0;
+  box-shadow: 0 0 0 6px rgba(108, 255, 192, 0.08);
+}
+
+.simulation-controls__status-text {
+  letter-spacing: 0.01em;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}

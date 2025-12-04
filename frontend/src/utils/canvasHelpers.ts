@@ -30,6 +30,7 @@ export const findPlanetAtPosition = (
 
   for (let i = currentSample.planets.length - 1; i >= 0; i--) {
     const planet = currentSample.planets[i];
+    if (planet.kind === "star") continue;
     const px = CANVAS_CENTER + (planet.x || 0) * RENDER_SCALE;
     const py = CANVAS_CENTER + (planet.y || 0) * RENDER_SCALE;
     const radius = (planet.radius ?? 6) + 4;

@@ -15,7 +15,7 @@ import "./App.css";
 const App: React.FC = () => {
   const { system, setSystem, buildSimulationPayload } = useSystemState();
   const { data, isComputing, error, runSimulation, computeRequestRef } = useSimulation();
-  const hasSimData = !!data?.samples?.length;
+  const hasSimData = !!(data?.samples?.length && data?.planetMetadata?.length);
 
   const { playing, playhead, blinkingPlanets, handlePlay, handlePause, handleReset, playStartRef, loopDurationRef } =
     usePlayback(data, hasSimData, isComputing, system.dtSec);
@@ -129,6 +129,7 @@ const App: React.FC = () => {
             playhead={playhead}
             totalDuration={totalDuration}
             progress={progress}
+            isComputing={isComputing}
             onPlay={handlePlay}
             onPause={handlePause}
             onReset={handleReset}

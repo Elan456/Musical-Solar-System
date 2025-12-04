@@ -25,4 +25,5 @@ planet and generates the needed stats like eccentricity, etc...
 
 # Frontend improvements
 
-- Add a throbber when waiting for a simulatio to complete to help offset the long loading times
+- The sun in the center should be animated maybe the 3 circles that compose it can pulse in and out
+- Planets should be assigned a random color and size on creation to make them more visually distinct

@@ -193,6 +193,65 @@ def _get_planets_min_max_radius(samples: List[Dict[str, Any]]) -> Dict[str, Tupl
     return planet_min_max
 
 
+def _inflate_samples(
+    samples: List[Dict[str, Any]], planet_metadata: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """
+    Expand compact trajectory samples (positions only) into the richer shape
+    expected by the music generation routines.
+    """
+    inflated: List[Dict[str, Any]] = []
+
+    for sample in samples:
+        positions = sample.get("positions") or []
+        planets: List[Dict[str, Any]] = []
+
+        for idx, meta in enumerate(planet_metadata):
+            pos = positions[idx] if idx < len(positions) else [0.0, 0.0]
+            x = float(pos[0]) if len(pos) > 0 else 0.0
+            y = float(pos[1]) if len(pos) > 1 else 0.0
+
+            planets.append(
+                {
+                    "name": meta.get("name", f"planet_{idx}"),
+                    "kind": meta.get("kind", "rocky"),
+                    "aAU": meta.get("aAU"),
+                    "mass": meta.get("mass"),
+                    "color": meta.get("color", "#ffffff"),
+                    "radius": meta.get("radius", RADIUS_RANGE[0]),
+                    "x": x,
+                    "y": y,
+                }
+            )
+
+        inflated.append({"t": float(sample.get("t") or 0.0), "planets": planets})
+
+    return inflated
+
+
+def _downsample_envelope(
+    envelope: List[Dict[str, float]], duration_sec: float, target_hz: float = 5.0
+) -> List[Dict[str, float]]:
+    """
+    Reduce envelope density to roughly target_hz samples per second to shrink
+    payload size while preserving shape. Always retains first/last points.
+    """
+    if duration_sec <= 0 or len(envelope) <= 2:
+        return envelope
+
+    target_count = max(2, int(duration_sec * target_hz))
+    if len(envelope) <= target_count:
+        return envelope
+
+    step = max(1, len(envelope) // target_count)
+    downsampled = envelope[::step]
+
+    if downsampled[-1]["t"] != envelope[-1]["t"]:
+        downsampled.append(envelope[-1])
+
+    return downsampled
+
+
 def _continuous_velocity_pads(
     samples: List[Dict[str, Any]],
     duration_sec: float,
@@ -278,6 +337,8 @@ def _continuous_velocity_pads(
             # Apply floor so it never goes completely silent (0.2 to 1.0 range)
             normalized = 0.2 + normalized * 0.8
             velocity_envelope.append({"t": t, "velocity": normalized})
+
+        velocity_envelope = _downsample_envelope(velocity_envelope, duration_sec)
 
         # Get MIDI note and other properties
         midi = get_note_from_order(all_orders[name], max_order)
@@ -400,6 +461,7 @@ def _planet_orbit_events(
 
 def events_for_system(
     samples: List[Dict[str, Any]],
+    planet_metadata: List[Dict[str, Any]],
     duration_sec: float,
 ) -> List[Dict[str, Any]]:
     """
@@ -412,9 +474,12 @@ def events_for_system(
     """
     if not samples:
         raise ValueError("No samples provided for event generation.")
+    expanded_samples = _inflate_samples(samples, planet_metadata)
+    if not expanded_samples:
+        raise ValueError("No valid samples after expansion for event generation.")
 
     # PHASE 1 OPTIMIZATION: Calculate all shared data once at the top
-    first = samples[0]
+    first = expanded_samples[0]
 
     # Find star position
     star_pos = None
@@ -442,7 +507,7 @@ def events_for_system(
     all_orders = {planet["name"]: order for order, planet in enumerate(planets_sorted)}
 
     # Calculate min/max radii for all planets (done once)
-    planet_min_max = _get_planets_min_max_radius(samples)
+    planet_min_max = _get_planets_min_max_radius(expanded_samples)
 
     # Calculate eccentricities for all planets (done once)
     all_eccentricities = {}
@@ -454,12 +519,12 @@ def events_for_system(
     print(f"Assigned planet orders: {all_orders}")
 
     # Pass pre-computed data to both functions
-    orbit_events = _planet_orbit_events(samples, star_pos, all_orders, all_eccentricities)
+    orbit_events = _planet_orbit_events(expanded_samples, star_pos, all_orders, all_eccentricities)
     print(f"Generated {len(orbit_events)} orbit events")
 
     # Generate continuous pads for gas planets
     pad_events = _continuous_velocity_pads(
-        samples, duration_sec, planets_sorted, all_orders, all_eccentricities
+        expanded_samples, duration_sec, planets_sorted, all_orders, all_eccentricities
     )
     print("pad events:", pad_events)
     print(f"Generated {len(pad_events)} pad events")

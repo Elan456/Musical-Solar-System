@@ -111,7 +111,8 @@ export const usePlayback = (
 
   useEffect(() => {
     if (data?.samples) {
-      loopDurationRef.current = Math.max(data.samples.length * dtSec, 10);
+      const effectiveDt = data.meta?.dtSec ?? dtSec;
+      loopDurationRef.current = Math.max(data.samples.length * effectiveDt, 10);
     }
   }, [data, dtSec]);
 

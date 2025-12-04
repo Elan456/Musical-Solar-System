@@ -7,6 +7,7 @@ interface SimulationControlsProps {
   playhead: number;
   totalDuration: number;
   progress: number;
+  isComputing: boolean;
   onPlay: () => void;
   onPause: () => void;
   onReset: () => void;
@@ -19,6 +20,7 @@ export const SimulationControls: React.FC<SimulationControlsProps> = ({
   playhead,
   totalDuration,
   progress,
+  isComputing,
   onPlay,
   onPause,
   onReset,
@@ -47,6 +49,16 @@ export const SimulationControls: React.FC<SimulationControlsProps> = ({
         >
           ↺ Reset
         </button>
+        <div
+          className={`simulation-controls__status ${
+            isComputing ? "simulation-controls__status--active" : "simulation-controls__status--ready"
+          }`}
+        >
+          {isComputing ? <span className="simulation-controls__spinner" /> : <span className="simulation-controls__status-dot" />}
+          <span className="simulation-controls__status-text">
+            {isComputing ? "Calculating new orbits…" : "Sim ready"}
+          </span>
+        </div>
         <div className="simulation-controls__time-display">
           <span className="simulation-controls__time-text">
             {playhead.toFixed(1)}s / {totalDuration.toFixed(1)}s

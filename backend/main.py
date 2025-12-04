@@ -38,9 +38,9 @@ class ComputeRequest(BaseModel):
     dtSec: float
 
 
-class Sample(BaseModel):
+class TrajectorySample(BaseModel):
     t: float
-    planets: List[dict]
+    positions: List[List[float]]
 
 
 class VelocityPoint(BaseModel):
@@ -61,8 +61,18 @@ class Event(BaseModel):
     eccentricity: Optional[float] = None
 
 
+class PlanetMetadata(BaseModel):
+    name: str
+    kind: Literal["rocky", "gas", "star"]
+    color: str
+    radius: float
+    mass: Optional[float] = None
+    aAU: Optional[float] = None
+
+
 class ComputeResponse(BaseModel):
-    samples: List[Sample]
+    planetMetadata: List[PlanetMetadata]
+    samples: List[TrajectorySample]
     events: List[Event]
     meta: dict
 
@@ -70,7 +80,12 @@ class ComputeResponse(BaseModel):
 @app.post("/api/compute", response_model=ComputeResponse)
 def compute(req: ComputeRequest):
     payload = req.dict()
-    samples = samples_for_system(payload, req.durationSec, req.dtSec)
-    events = events_for_system(samples, req.durationSec)
+    result = samples_for_system(payload, req.durationSec, req.dtSec)
+    events = events_for_system(result["samples"], result["planetMetadata"], req.durationSec)
     meta = {"dtSec": req.dtSec}
-    return {"samples": samples, "events": events, "meta": meta}
+    return {
+        "planetMetadata": result["planetMetadata"],
+        "samples": result["samples"],
+        "events": events,
+        "meta": meta,
+    }

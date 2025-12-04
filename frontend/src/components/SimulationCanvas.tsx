@@ -8,6 +8,7 @@ const RENDER_SCALE = 500 / 2;
 const DEFAULT_PLANET_COLORS: Record<string, string> = {
   rocky: "#a0a0a0",
   gas: "#4af4ff",
+  star: "#ffdd44",
 };
 
 interface SimulationCanvasProps {
@@ -59,7 +60,7 @@ export const SimulationCanvas: React.FC<SimulationCanvasProps> = ({
       let { x, y, name, radius } = p;
       if (typeof x !== "number" || typeof y !== "number") return null;
 
-      if (name === "Star") return null;
+      if (name === "Star" || p.kind === "star") return null;
 
       if (draggingTemplate?.name === name && draggingTemplate.position) {
         x = draggingTemplate.position[0];
@@ -67,7 +68,7 @@ export const SimulationCanvas: React.FC<SimulationCanvasProps> = ({
       }
 
       const visuals = planetVisuals[name];
-      const color = visuals?.color ?? DEFAULT_PLANET_COLORS.rocky;
+      const color = visuals?.color ?? DEFAULT_PLANET_COLORS[p.kind] ?? DEFAULT_PLANET_COLORS.rocky;
       const displayRadius = visuals?.radius ?? radius ?? 6;
 
       const cx = CANVAS_CENTER + x * RENDER_SCALE;

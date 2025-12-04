@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import { BodyTemplate, CustomBodyConfig, ComputeResponse, Planet } from "../types";
+import { BodyTemplate, CustomBodyConfig, ComputeResponse } from "../types";
 import { computeMassFromConfig, makeUniquePlanetName } from "../utils/planetHelpers";
 
 const API = "http://localhost:8000/api";
@@ -78,11 +78,14 @@ export const usePlanetManagement = (
         const json: ComputeResponse = await res.json();
         if (previewRequestRef.current !== requestId) return;
 
+        const planetIdx = json.planetMetadata?.findIndex((p) => p.name === planet.name) ?? -1;
         const points =
-          json.samples
-            ?.map((sample) => sample.planets.find((p: Planet) => p.name === planet.name))
-            .filter(Boolean)
-            .map((p: Planet) => ({ x: p.x, y: p.y })) ?? [];
+          planetIdx >= 0
+            ? json.samples
+                ?.map((sample) => sample.positions?.[planetIdx])
+                .filter((pos): pos is [number, number] => Array.isArray(pos))
+                .map((pos) => ({ x: pos[0], y: pos[1] }))
+            : [];
 
         setTrajectory({ planetName: planet.name, points });
       } catch (err) {

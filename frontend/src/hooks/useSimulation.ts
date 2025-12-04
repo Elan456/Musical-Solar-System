@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { SystemPreset, ComputeResponse, BodyTemplate } from "../types";
+import { SystemPreset, ComputeResponse } from "../types";
 import { stopAll } from "../audio";
-import { ensurePlanetForPayload } from "../utils/planetHelpers";
 
 const API = "http://localhost:8000/api";
 

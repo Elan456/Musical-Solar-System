@@ -26,20 +26,25 @@ export type CustomBodyConfig = Pick<
 
 export type Planet = {
   name: string;
-  kind: "rocky" | "gas";
-  aAU: number;
-  mass?: number;
-  color?: string;
-  radius?: number;
+  kind: "rocky" | "gas" | "star";
+  color: string;
+  radius: number;
   x: number;
   y: number;
-  position?: [number, number, number];
-  velocity?: [number, number, number];
 };
 
-export type Sample = {
+export type PlanetMetadata = {
+  name: string;
+  kind: "rocky" | "gas" | "star";
+  color: string;
+  radius: number;
+  mass?: number;
+  aAU?: number;
+};
+
+export type TrajectorySample = {
   t: number;
-  planets: Planet[];
+  positions: [number, number][];
 };
 
 export type Event = {
@@ -55,7 +60,8 @@ export type Event = {
 };
 
 export type ComputeResponse = {
-  samples: Sample[];
+  planetMetadata: PlanetMetadata[];
+  samples: TrajectorySample[];
   events: Event[];
-  meta: { dtSec: number; musicMode: string };
+  meta: { dtSec: number; musicMode?: string };
 };

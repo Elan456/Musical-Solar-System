@@ -7,7 +7,7 @@ numbers remain readable and render nicely in the 2D plane.
 from __future__ import annotations
 
 import math
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 from .system import System
 
@@ -85,6 +85,37 @@ def _build_initial_bodies(system_cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
     return bodies
 
 
+def _extract_metadata(first_sample: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List[str]]:
+    """
+    Pull shared, static metadata from the first sample and preserve ordering
+    so position arrays can be zipped back together later.
+    """
+    planet_metadata: List[Dict[str, Any]] = []
+    ordered_names: List[str] = []
+
+    for body in first_sample.get("bodies", []):
+        metadata = dict(body.get("metadata") or {})
+        if metadata.get("visible", True) is False:
+            continue
+
+        position = body.get("position") or [0.0, 0.0, 0.0]
+        x, y = float(position[0]), float(position[1])
+
+        planet_metadata.append(
+            {
+                "name": body["name"],
+                "kind": metadata.get("kind", "rocky"),
+                "color": metadata.get("color", "#ffffff"),
+                "radius": metadata.get("radius", 5),
+                "mass": metadata.get("mass"),
+                "aAU": metadata.get("aAU", math.hypot(x, y)),
+            }
+        )
+        ordered_names.append(body["name"])
+
+    return planet_metadata, ordered_names
+
+
 def samples_for_system(system_cfg: Dict[str, Any], duration_sec: float, dt_sec: float):
     if dt_sec <= 0:
         raise ValueError("dtSec must be positive")
@@ -97,27 +128,29 @@ def samples_for_system(system_cfg: Dict[str, Any], duration_sec: float, dt_sec: 
     raw_samples = system.sample_positions(
         duration_seconds=duration_sec, sample_rate_hz=sample_rate
     )
+
+    if not raw_samples:
+        return {"planetMetadata": [], "samples": []}
+
+    planet_metadata, ordered_names = _extract_metadata(raw_samples[0])
+    name_to_index = {name: idx for idx, name in enumerate(ordered_names)}
+
     samples: List[Dict[str, Any]] = []
     for sample in raw_samples:
-        planets = []
-        for body in sample["bodies"]:
+        positions: List[List[float]] = [[0.0, 0.0] for _ in ordered_names]
+
+        for body in sample.get("bodies", []):
             metadata = dict(body.get("metadata") or {})
             if metadata.get("visible", True) is False:
                 continue
-            position = body["position"]
-            x = position[0]
-            y = position[1]
-            planets.append(
-                {
-                    "name": body["name"],
-                    "kind": metadata.get("kind", "rocky"),
-                    "aAU": metadata.get("aAU", math.sqrt(x * x + y * y)),
-                    "mass": metadata.get("mass"),
-                    "color": metadata.get("color", "#ffffff"),
-                    "radius": metadata.get("radius", 5),
-                    "x": x,
-                    "y": y,
-                }
-            )
-        samples.append({"t": sample["t"], "planets": planets})
-    return samples
+
+            idx = name_to_index.get(body["name"])
+            if idx is None:
+                continue
+
+            pos = body.get("position") or [0.0, 0.0, 0.0]
+            positions[idx] = [float(pos[0]), float(pos[1])]
+
+        samples.append({"t": float(sample.get("t") or 0.0), "positions": positions})
+
+    return {"planetMetadata": planet_metadata, "samples": samples}
