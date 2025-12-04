@@ -36,6 +36,8 @@ class ComputeRequest(BaseModel):
     planets: List[Planet]
     durationSec: float
     dtSec: float
+    trajectoryOnly: Optional[bool] = False
+    eventsOnly: Optional[bool] = False
 
 
 class TrajectorySample(BaseModel):
@@ -80,12 +82,26 @@ class ComputeResponse(BaseModel):
 @app.post("/api/compute", response_model=ComputeResponse)
 def compute(req: ComputeRequest):
     payload = req.dict()
-    result = samples_for_system(payload, req.durationSec, req.dtSec)
-    events = events_for_system(result["samples"], result["planetMetadata"], req.durationSec)
+    include_samples = not bool(req.eventsOnly)
+    include_events = not bool(req.trajectoryOnly)
+
+    planet_metadata: List[PlanetMetadata] = []
+    samples: List[TrajectorySample] = []
+
+    if include_samples or include_events:
+        result = samples_for_system(payload, req.durationSec, req.dtSec)
+        planet_metadata = result["planetMetadata"]
+        samples = result["samples"]
+
+    events = (
+        events_for_system(samples, planet_metadata, req.durationSec)
+        if include_events
+        else []
+    )
     meta = {"dtSec": req.dtSec}
     return {
-        "planetMetadata": result["planetMetadata"],
-        "samples": result["samples"],
+        "planetMetadata": planet_metadata,
+        "samples": samples if include_samples else [],
         "events": events,
         "meta": meta,
     }

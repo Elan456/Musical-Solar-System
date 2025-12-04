@@ -66,7 +66,10 @@ export const usePlanetManagement = (
             ? [...planets, planet]
             : planets.map((p, i) => (i === idx ? { ...planet } : { ...p }));
 
-        const payload = options.buildSimulationPayload(overridePlanets);
+        const payload = {
+          ...options.buildSimulationPayload(overridePlanets),
+          trajectoryOnly: true,
+        };
         const res = await fetch(`${API}/compute`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },

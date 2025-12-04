@@ -15,6 +15,9 @@ export type SystemPreset = {
   planets: BodyTemplate[];
   durationSec: number;
   dtSec: number;
+  musicMode?: string;
+  trajectoryOnly?: boolean;
+  eventsOnly?: boolean;
 };
 
 export type CustomBodyConfig = Pick<
