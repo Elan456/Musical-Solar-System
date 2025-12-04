@@ -1,29 +1,5 @@
+# Optimization Profiling
 
-
-# Optimizations 
-
-As more planets are added performance slows really bad and simulation times get really long.
-
-Steps
-1. Identify bottlenecks in the code for simulations
- - Check if music generation or trajectory calculations are taking longer
- - See if too much info is being sent back to the frontend
- - See if the velocity envelopes are too big and instead we could send smaller key points and have the frontend interpolate
- - Looks for other inefficiencies in the code
-2. Write a markdown file with all the identified bottlenecks and possible solutions and detailed steps to implement them
-3. Request approval for the changes
-4. Implement the changes
-
-
-# Backend Refactoring
-
-- The music.py module has grown too large and must be split into a package
-- Have a module for the stat generation of the planets where it runs through each
-planet and generates the needed stats like eccentricity, etc... 
-- Improve optimizations such that only the neccessary information is sent depending on the request
-- For example, a trajectory-only sim should not send back any audio event data
-
-# Frontend improvements
-
-- The sun in the center should be animated maybe the 3 circles that compose it can pulse in and out
-- Planets should be assigned a random color and size on creation to make them more visually distinct
+With more than 5 planets simulation loading times get too long. 
+We need to preapre a profiling script to see where the bottlenecks are what's introducing the most latency or overhead
+Write a profiling script that starts the backend and simulates loading a system with 10 planets, measuring the time taken for each step of the loading process.

@@ -8,10 +8,12 @@ import math
 from typing import Iterable, List, Optional, Sequence, Dict, Any
 
 import numpy as np
+from fastquadtree import QuadTree
 
 from .body import PhysicsBody
 
 G_DEFAULT = 6.67430e-11  # m^3 kg^-1 s^-2
+CULL_DISTANCE_AU = 1.0  # Skip planet-planet forces beyond this distance
 
 
 class System:
@@ -68,21 +70,83 @@ class System:
         return sum(body.mass for body in self.bodies)
 
     def _compute_gravity(self) -> None:
+        """
+        Compute pairwise gravity. Star interactions are always applied.
+        Planet-planet interactions are culled if planets are >1 AU apart,
+        using a QuadTree to avoid O(n^2) scans.
+        """
         for body in self.bodies:
             body.reset_force()
-        for idx, primary in enumerate(self.bodies):
-            for secondary in self.bodies[idx + 1 :]:
-                offset = secondary.position - primary.position
-                distance = np.linalg.norm(offset)
-                if distance == 0:
-                    continue  # Collocated bodies; skip to avoid singularity.
-                direction = offset / distance
-                magnitude = (
-                    self.gravitational_constant * primary.mass * secondary.mass / distance**2
-                )
-                force = magnitude * direction
-                primary.apply_force(force)
-                secondary.apply_force(-force)
+        if not self.bodies:
+            return
+
+        def apply_force_pair(primary: PhysicsBody, secondary: PhysicsBody) -> None:
+            offset = secondary.position - primary.position
+            distance = np.linalg.norm(offset)
+            if distance == 0:
+                return  # Collocated bodies; skip to avoid singularity.
+            direction = offset / distance
+            magnitude = (
+                self.gravitational_constant * primary.mass * secondary.mass / distance**2
+            )
+            force = magnitude * direction
+            primary.apply_force(force)
+            secondary.apply_force(-force)
+
+        stars: List[PhysicsBody] = [
+            body for body in self.bodies if (body.metadata or {}).get("kind") == "star"
+        ]
+        non_stars: List[PhysicsBody] = [
+            body for body in self.bodies if (body.metadata or {}).get("kind") != "star"
+        ]
+
+        # Always apply star ↔ body interactions (no distance cull).
+        for star in stars:
+            for other in non_stars:
+                apply_force_pair(star, other)
+
+        if len(non_stars) < 2:
+            return
+
+        xs = [float(body.position[0]) for body in non_stars]
+        ys = [float(body.position[1]) for body in non_stars]
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+        padding = CULL_DISTANCE_AU
+        if min_x == max_x:
+            min_x -= padding
+            max_x += padding
+        if min_y == max_y:
+            min_y -= padding
+            max_y += padding
+
+        qt_bounds = (min_x - padding, min_y - padding, max_x + padding, max_y + padding)
+        quadtree = QuadTree(qt_bounds, capacity=8, track_objects=False)
+
+        for body in non_stars:
+            quadtree.insert((float(body.position[0]), float(body.position[1])))
+
+        # Query neighbors within 1 AU using bounding boxes, then precise distance filter.
+        for idx, body in enumerate(non_stars):
+            x = float(body.position[0])
+            y = float(body.position[1])
+            query_rect = (
+                x - CULL_DISTANCE_AU,
+                y - CULL_DISTANCE_AU,
+                x + CULL_DISTANCE_AU,
+                y + CULL_DISTANCE_AU,
+            )
+            candidates = quadtree.query(query_rect, as_items=False)
+            for candidate_id, cand_x, cand_y in candidates:
+                if candidate_id <= idx:
+                    continue  # ensure each pair once
+                dx = cand_x - x
+                dy = cand_y - y
+                distance = math.hypot(dx, dy)
+                if distance > CULL_DISTANCE_AU or distance == 0:
+                    continue
+                other = non_stars[candidate_id]
+                apply_force_pair(body, other)
 
     def step(self, dt: float) -> None:
         """
