@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { BodyTemplate, CustomBodyConfig, ComputeResponse } from "../types";
-import { computeMassFromConfig, makeUniquePlanetName } from "../utils/planetHelpers";
+import { computeMassFromConfig, getRandomPlanetVisuals, makeUniquePlanetName } from "../utils/planetHelpers";
 
 const API = "http://localhost:8000/api";
 
@@ -31,13 +31,18 @@ interface UsePlanetManagementResult {
 export const usePlanetManagement = (
   options: UsePlanetManagementOptions
 ): UsePlanetManagementResult => {
+  const buildInitialCustomBody = () => {
+    const visuals = getRandomPlanetVisuals("rocky");
+    return {
+      kind: "rocky" as const,
+      color: visuals.color,
+      radius: visuals.radius,
+      ellipticity: 0,
+    };
+  };
+
   const [selectedPlanetName, setSelectedPlanetName] = useState<string | null>(null);
-  const [customBody, setCustomBody] = useState<CustomBodyConfig>({
-    kind: "rocky",
-    color: "#ffffff",
-    radius: 6,
-    ellipticity: 0,
-  });
+  const [customBody, setCustomBody] = useState<CustomBodyConfig>(buildInitialCustomBody);
   const [trajectory, setTrajectory] = useState<{
     planetName: string;
     points: { x: number; y: number }[];
@@ -46,10 +51,11 @@ export const usePlanetManagement = (
   const previewRequestRef = useRef(0);
 
   const syncCustomBodyToPlanet = useCallback((planet: BodyTemplate) => {
+    const fallbackVisuals = getRandomPlanetVisuals(planet.kind);
     setCustomBody({
       kind: planet.kind,
-      color: planet.color ?? "#ffffff",
-      radius: planet.radius ?? 6,
+      color: planet.color ?? fallbackVisuals.color,
+      radius: planet.radius ?? fallbackVisuals.radius,
       ellipticity: planet.ellipticity ?? 0,
     });
   }, []);
@@ -102,17 +108,19 @@ export const usePlanetManagement = (
 
   const handleSpawnPlanet = useCallback(
     (planets: BodyTemplate[]): BodyTemplate => {
+      const visuals = getRandomPlanetVisuals(customBody.kind);
+      const planetConfig = { ...customBody, ...visuals };
       const baseName = customBody.kind === "gas" ? "Gas Giant" : "Rocky Body";
       const name = makeUniquePlanetName(baseName, planets);
-      const mass = computeMassFromConfig(customBody);
+      const mass = computeMassFromConfig(planetConfig);
       const orbit = 0.3 + (planets.length * 0.12) % 0.6;
 
       const newPlanet: BodyTemplate = {
         name,
-        kind: customBody.kind,
-        color: customBody.color,
-        radius: customBody.radius,
-        ellipticity: customBody.ellipticity,
+        kind: planetConfig.kind,
+        color: planetConfig.color,
+        radius: planetConfig.radius,
+        ellipticity: planetConfig.ellipticity,
         mass,
         aAU: orbit,
         position: [orbit, 0, 0],

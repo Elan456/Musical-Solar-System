@@ -5,6 +5,65 @@ const DEFAULT_PLANET_COLORS: Record<CustomBodyConfig["kind"], string> = {
   gas: "#4af4ff",
 };
 
+const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
+
+const hslToHex = (h: number, s: number, l: number): string => {
+  const sat = clamp01(s / 100);
+  const light = clamp01(l / 100);
+  const c = (1 - Math.abs(2 * light - 1)) * sat;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = light - c / 2;
+
+  let r = 0;
+  let g = 0;
+  let b = 0;
+
+  if (h >= 0 && h < 60) {
+    r = c;
+    g = x;
+  } else if (h >= 60 && h < 120) {
+    r = x;
+    g = c;
+  } else if (h >= 120 && h < 180) {
+    g = c;
+    b = x;
+  } else if (h >= 180 && h < 240) {
+    g = x;
+    b = c;
+  } else if (h >= 240 && h < 300) {
+    r = x;
+    b = c;
+  } else {
+    r = c;
+    b = x;
+  }
+
+  const toHex = (channel: number) => Math.round((channel + m) * 255)
+    .toString(16)
+    .padStart(2, "0");
+
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+};
+
+export const getRandomPlanetColor = (kind: CustomBodyConfig["kind"]): string => {
+  const hueRange = kind === "gas" ? [180, 280] : [10, 70];
+  const hue = hueRange[0] + Math.random() * (hueRange[1] - hueRange[0]);
+  const saturation = 58 + Math.random() * 18;
+  const lightness = (kind === "gas" ? 55 : 48) + Math.random() * 10;
+  return hslToHex(hue, saturation, lightness);
+};
+
+export const getRandomPlanetRadius = (): number => {
+  const min = 4;
+  const max = 11;
+  return Math.round(min + Math.random() * (max - min));
+};
+
+export const getRandomPlanetVisuals = (kind: CustomBodyConfig["kind"]): { color: string; radius: number } => ({
+  color: getRandomPlanetColor(kind),
+  radius: getRandomPlanetRadius(),
+});
+
 export const getSimulationKey = (planets: BodyTemplate[]): string => {
   return JSON.stringify(
     planets.map((p) => ({

@@ -134,9 +134,11 @@ export const SimulationCanvas: React.FC<SimulationCanvasProps> = ({
         />
       ))}
 
-      <circle cx={CANVAS_CENTER} cy={CANVAS_CENTER} r={15} fill="#ffdd44" />
-      <circle cx={CANVAS_CENTER} cy={CANVAS_CENTER} r={20} fill="#ffdd44" opacity={0.3} />
-      <circle cx={CANVAS_CENTER} cy={CANVAS_CENTER} r={25} fill="#ffdd44" opacity={0.1} />
+      <g className="sun">
+        <circle className="sun__halo sun__halo--outer" cx={CANVAS_CENTER} cy={CANVAS_CENTER} r={26} />
+        <circle className="sun__halo sun__halo--inner" cx={CANVAS_CENTER} cy={CANVAS_CENTER} r={20} />
+        <circle className="sun__core" cx={CANVAS_CENTER} cy={CANVAS_CENTER} r={15} />
+      </g>
 
       {trajectory?.points?.length ? (
         <polyline
