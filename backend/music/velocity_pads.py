@@ -89,7 +89,7 @@ def velocity_pad_events(samples: List[Dict[str, Any]], duration_sec: float, stat
         radius = float(gas_planet.get("radius") or 0.0)
         radius_factor = radius_to_velocity(radius)
         # Gas giants (pads): softer base, moderate range (40-110)
-        base_vel = int(40 + radius_factor * 70)
+        base_vel = int(10 + radius_factor * 70)
         base_vel = max(1, min(127, base_vel))
 
         events.append(

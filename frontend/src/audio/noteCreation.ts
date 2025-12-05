@@ -32,7 +32,8 @@ export function createNoteOscillator(
   const noteGain = audioCtx.createGain();
   const midpoint = 60;
   const frequencyCompensation = 1.0 - Math.max(0, (midi - midpoint) / 24);
-  const baseGain = isContinuous ? velocity * 0.2 : velocity * 0.35;
+  // Increased multipliers to make volume difference more dramatic for students
+  const baseGain = isContinuous ? velocity * 0.4 : velocity * 0.6;
   const peakGain = baseGain * frequencyCompensation;
 
   const dryGain = audioCtx.createGain();

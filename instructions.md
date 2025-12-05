@@ -1,5 +1,5 @@
 # Improvements to be made
 
-1. Everytime you drop a planet in a new orbit, it should show the simulated trajectory of it. (This already works)
-2. When you drop the planet it should stay where it was rather than snap back to the orignal locaiton and then appear at the new location after the simulation is done. (This is the part that needs to be fixed)
-   A solution could be to simply render the planet in the new locaiton while waiting for the simulation to finish and then transfer to the simulation data when it is ready.
+1. The radius of the planet does not seem to affect the volume of it's notes
+   - Find where radius affect volume (is it backend or frontend?)
+   - Make the radius have a very dramatic effect on volume (it needs to be apparant to middle school students)

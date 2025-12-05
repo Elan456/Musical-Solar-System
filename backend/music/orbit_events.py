@@ -28,7 +28,7 @@ def _note_events(
     radius_factor = radius_to_velocity(radius)
     if instrument == "mallet":
         # Mallets: louder base, wider range (60-127)
-        vel = int(60 + radius_factor * 67)
+        vel = int(20 + radius_factor * 120)
     else:
         # Pads: softer base, moderate range (40-110)
         vel = int(40 + radius_factor * 70)

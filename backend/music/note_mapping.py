@@ -41,15 +41,20 @@ def radius_to_velocity(radius: float) -> float:
     """
     Map a planet radius to a velocity for musical purposes.
     Larger radius -> higher velocity (for volume calculation).
+    Uses a cubic curve to make the difference VERY dramatic and apparent.
+    Small planets are very quiet, large planets are very loud.
     """
     r_min, r_max = RADIUS_RANGE
-    v_min, v_max = 0.1, 1.0
+    v_min, v_max = 0.00, 1.0  # Wider range: smallest planets are much quieter
     if radius < r_min:
         return v_min
     if radius > r_max:
         return v_max
+    # Normalize to 0-1
     norm = (radius - r_min) / (r_max - r_min)
-    return v_min + norm * (v_max - v_min)
+    # Apply cubic curve for dramatic effect: small planets very quiet, large planets very loud
+    curved = norm ** 3
+    return v_min + curved * (v_max - v_min)
 
 
 def note_duration(instrument: str, speed: float | None = None) -> float:
