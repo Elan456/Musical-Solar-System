@@ -23,8 +23,15 @@ def _note_events(
     max_order = max(stats.orders.values()) if stats.orders else 0
     midi = get_note_from_order(stats.orders.get(planet["name"], 0), max_order)
 
-    base_vel = int(100 if instrument == "mallet" else 80)
-    vel = base_vel + int(radius_to_velocity(radius) * 40)
+    # Map radius to velocity with wider dynamic range
+    # radius_to_velocity returns 0.1-1.0, we scale this to use more of MIDI's 1-127 range
+    radius_factor = radius_to_velocity(radius)
+    if instrument == "mallet":
+        # Mallets: louder base, wider range (60-127)
+        vel = int(60 + radius_factor * 67)
+    else:
+        # Pads: softer base, moderate range (40-110)
+        vel = int(40 + radius_factor * 70)
     vel = max(1, min(127, vel))
 
     duration = note_duration(instrument, speed)

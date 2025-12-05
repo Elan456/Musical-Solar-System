@@ -84,8 +84,12 @@ def velocity_pad_events(samples: List[Dict[str, Any]], duration_sec: float, stat
         eccentricity = stats.eccentricities.get(name, 0.0)
         reverb = eccentricity_to_reverb(eccentricity)
 
+        # Map radius to velocity with wider dynamic range for gas giants
+        # radius_to_velocity returns 0.1-1.0
         radius = float(gas_planet.get("radius") or 0.0)
-        base_vel = 80 + int(radius_to_velocity(radius) * 40)
+        radius_factor = radius_to_velocity(radius)
+        # Gas giants (pads): softer base, moderate range (40-110)
+        base_vel = int(40 + radius_factor * 70)
         base_vel = max(1, min(127, base_vel))
 
         events.append(

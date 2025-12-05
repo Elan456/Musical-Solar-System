@@ -1,4 +1,4 @@
-import React, { useCallback } from "react";
+import React, { useCallback, useRef } from "react";
 import { BodyTemplate } from "./types";
 import { SimulationCanvas } from "./components/SimulationCanvas";
 import { SimulationControls } from "./components/SimulationControls";
@@ -16,6 +16,7 @@ const App: React.FC = () => {
   const { system, setSystem, buildSimulationPayload } = useSystemState();
   const { data, isComputing, error, runSimulation, computeRequestRef } = useSimulation();
   const hasSimData = !!(data?.samples?.length && data?.planetMetadata?.length);
+  const trajectoryThrottleRef = useRef<number | null>(null);
 
   const { playing, playhead, blinkingPlanets, handlePlay, handlePause, handleReset, playStartRef, loopDurationRef } =
     usePlayback(data, hasSimData, isComputing, system.dtSec);
@@ -78,18 +79,33 @@ const App: React.FC = () => {
   const onCanvasMouseMove = useCallback(
     (evt: React.MouseEvent<SVGSVGElement>) => {
       handleCanvasMouseMove(evt, (planetName, simX, simY, distance) => {
-        setSystem((prev) => ({
-          ...prev,
-          planets: prev.planets.map((p) => {
+        setSystem((prev) => {
+          const updatedPlanets = prev.planets.map((p) => {
             if (p.name !== planetName) return p;
             const next: BodyTemplate = { ...p, aAU: distance, position: [simX, simY, 0] };
             latestDraggedPlanetRef.current = next;
             return next;
-          }),
-        }));
+          });
+
+          // Throttle trajectory computation to avoid too many API calls
+          if (trajectoryThrottleRef.current) {
+            clearTimeout(trajectoryThrottleRef.current);
+          }
+          trajectoryThrottleRef.current = window.setTimeout(() => {
+            const draggedPlanet = latestDraggedPlanetRef.current;
+            if (draggedPlanet) {
+              computeTrajectoryPreview(draggedPlanet, updatedPlanets);
+            }
+          }, 150); // Throttle to 150ms
+
+          return {
+            ...prev,
+            planets: updatedPlanets,
+          };
+        });
       });
     },
-    [handleCanvasMouseMove]
+    [handleCanvasMouseMove, computeTrajectoryPreview]
   );
 
   const onCanvasMouseUp = useCallback(() => {
