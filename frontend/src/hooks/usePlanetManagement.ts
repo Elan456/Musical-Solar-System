@@ -115,6 +115,14 @@ export const usePlanetManagement = (
       const mass = computeMassFromConfig(planetConfig);
       const orbit = 0.3 + (planets.length * 0.12) % 0.6;
 
+      // Apply rotational increment to prevent planets from overlapping
+      // Each new planet gets a different angular position
+      // Every six planets, the angle increment increases to spread them out more
+      const angleIncrement = (2 * Math.PI) / 8 * Math.floor((planets.length / 5)); // 45 degrees in radians
+      const angle = (angleIncrement) % (2 * Math.PI);
+      const x = orbit * Math.cos(angle);
+      const y = orbit * Math.sin(angle);
+
       const newPlanet: BodyTemplate = {
         name,
         kind: planetConfig.kind,
@@ -123,7 +131,7 @@ export const usePlanetManagement = (
         ellipticity: planetConfig.ellipticity,
         mass,
         aAU: orbit,
-        position: [orbit, 0, 0],
+        position: [x, y, 0],
       };
 
       return newPlanet;

@@ -24,7 +24,7 @@ def _note_events(
     midi = get_note_from_order(stats.orders.get(planet["name"], 0), max_order)
 
     base_vel = int(100 if instrument == "mallet" else 80)
-    vel = base_vel - int(radius_to_velocity(radius) * 40)
+    vel = base_vel + int(radius_to_velocity(radius) * 40)
     vel = max(1, min(127, vel))
 
     duration = note_duration(instrument, speed)

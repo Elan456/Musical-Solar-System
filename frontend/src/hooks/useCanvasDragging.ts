@@ -24,6 +24,7 @@ export const useCanvasDragging = (): UseCanvasDraggingResult => {
   const [isDragging, setIsDragging] = useState(false);
   const [draggingPlanetName, setDraggingPlanetName] = useState<string | null>(null);
   const latestDraggedPlanetRef = useRef<BodyTemplate | null>(null);
+  const dragEndTimeoutRef = useRef<number | null>(null);
 
   const handleCanvasMouseDown = useCallback(
     (
@@ -32,6 +33,12 @@ export const useCanvasDragging = (): UseCanvasDraggingResult => {
       planets: BodyTemplate[],
       onSelect: (planet: BodyTemplate) => void
     ) => {
+      // Clear any pending timeout
+      if (dragEndTimeoutRef.current) {
+        clearTimeout(dragEndTimeoutRef.current);
+        dragEndTimeoutRef.current = null;
+      }
+
       const index = findPlanetAtPosition(evt, currentSample, planets);
       if (index === null) return;
 
@@ -65,7 +72,14 @@ export const useCanvasDragging = (): UseCanvasDraggingResult => {
     if (!isDragging) return null;
     const finalPlanet = latestDraggedPlanetRef.current;
     setIsDragging(false);
-    setDraggingPlanetName(null);
+
+    // Keep draggingPlanetName set for a short period to prevent snap-back
+    // This allows the canvas to continue using the dragged position until simulation updates
+    dragEndTimeoutRef.current = setTimeout(() => {
+      setDraggingPlanetName(null);
+      dragEndTimeoutRef.current = null;
+    }, 100); // Short delay to bridge the gap until new simulation data arrives
+
     return finalPlanet;
   }, [isDragging]);
 

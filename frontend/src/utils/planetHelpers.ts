@@ -46,8 +46,24 @@ const hslToHex = (h: number, s: number, l: number): string => {
 };
 
 export const getRandomPlanetColor = (kind: CustomBodyConfig["kind"]): string => {
-  const hueRange = kind === "gas" ? [180, 280] : [10, 70];
-  const hue = hueRange[0] + Math.random() * (hueRange[1] - hueRange[0]);
+  let hue: number;
+
+  if (kind === "gas") {
+    // Gas giants: cyans, blues, purples (180-280°)
+    const hueRange = [180, 280];
+    hue = hueRange[0] + Math.random() * (hueRange[1] - hueRange[0]);
+  } else {
+    // Rocky planets: include reds, oranges, yellows, greens, and blues
+    // Choose from multiple color ranges to get better variety
+    const colorRanges = [
+      [10, 70],    // reds, oranges, yellows
+      [110, 150],  // greens
+      [200, 260],  // blues
+    ];
+    const selectedRange = colorRanges[Math.floor(Math.random() * colorRanges.length)];
+    hue = selectedRange[0] + Math.random() * (selectedRange[1] - selectedRange[0]);
+  }
+
   const saturation = 58 + Math.random() * 18;
   const lightness = (kind === "gas" ? 55 : 48) + Math.random() * 10;
   return hslToHex(hue, saturation, lightness);

@@ -93,9 +93,11 @@ const App: React.FC = () => {
   );
 
   const onCanvasMouseUp = useCallback(() => {
-    const finalPlanet = stopDragging();
-    if (finalPlanet) computeTrajectoryPreview(finalPlanet, system.planets);
-  }, [stopDragging, computeTrajectoryPreview, system.planets]);
+    stopDragging();
+    // Don't call computeTrajectoryPreview here - let useAutoSimulation handle it
+    // This prevents the snap-back behavior where the planet jumps to its old position
+    // while waiting for the new simulation to complete
+  }, [stopDragging]);
 
   const totalDuration = loopDurationRef.current;
   const progress = totalDuration > 0 ? (playhead / totalDuration) * 100 : 0;

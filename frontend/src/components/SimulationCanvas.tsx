@@ -62,6 +62,7 @@ export const SimulationCanvas: React.FC<SimulationCanvasProps> = ({
 
       if (name === "Star" || p.kind === "star") return null;
 
+      // Use the dragging position if this planet is being dragged
       if (draggingTemplate?.name === name && draggingTemplate.position) {
         x = draggingTemplate.position[0];
         y = draggingTemplate.position[1];
