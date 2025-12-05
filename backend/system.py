@@ -119,12 +119,15 @@ class System:
         if min_y == max_y:
             min_y -= padding
             max_y += padding
-
         qt_bounds = (min_x - padding, min_y - padding, max_x + padding, max_y + padding)
-        quadtree = QuadTree(qt_bounds, capacity=8, track_objects=False)
+        quadtree = QuadTree(qt_bounds, capacity=8, track_objects=True)
 
         for body in non_stars:
-            quadtree.insert((float(body.position[0]), float(body.position[1])))
+            try:
+                quadtree.insert((float(body.position[0]), float(body.position[1])), obj=body)
+            except ValueError as e:
+                # Planet is OOB
+                pass
 
         # Query neighbors within 1 AU using bounding boxes, then precise distance filter.
         for idx, body in enumerate(non_stars):
@@ -136,16 +139,16 @@ class System:
                 x + CULL_DISTANCE_AU,
                 y + CULL_DISTANCE_AU,
             )
-            candidates = quadtree.query(query_rect, as_items=False)
-            for candidate_id, cand_x, cand_y in candidates:
-                if candidate_id <= idx:
+            candidates = quadtree.query(query_rect, as_items=True)
+            for candidate_item in candidates:
+                if candidate_item.id_ <= idx:
                     continue  # ensure each pair once
-                dx = cand_x - x
-                dy = cand_y - y
+                dx = float(candidate_item.x) - x
+                dy = float(candidate_item.y) - y
                 distance = math.hypot(dx, dy)
                 if distance > CULL_DISTANCE_AU or distance == 0:
                     continue
-                other = non_stars[candidate_id]
+                other = non_stars[candidate_item.id_]
                 apply_force_pair(body, other)
 
     def step(self, dt: float) -> None:
