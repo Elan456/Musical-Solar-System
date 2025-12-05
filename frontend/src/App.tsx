@@ -35,7 +35,7 @@ const App: React.FC = () => {
     previewRequestRef,
   } = usePlanetManagement({ buildSimulationPayload });
 
-  const { isDragging, draggingPlanetName, latestDraggedPlanetRef, handleCanvasMouseDown, handleCanvasMouseMove, stopDragging } =
+  const { isDragging, draggingPlanetName, latestDraggedPlanetRef, handleCanvasMouseDown, handleCanvasMouseMove, stopDragging, clearDraggingPlanetName } =
     useCanvasDragging();
 
   const { planetVisuals, currentSample } = usePlanetVisualsAndSample(system.planets, data, hasSimData, playhead, system.dtSec);
@@ -47,6 +47,7 @@ const App: React.FC = () => {
     runSimulation,
     computeRequestRef,
     playStartRef,
+    clearDraggingPlanetName,
   });
 
   const { handlePlanetSelect, handlePlanetRemove, handleSpawnPlanetClick, handleBodyConfigChange } = usePlanetHandlers({

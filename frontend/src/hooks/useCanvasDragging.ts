@@ -18,6 +18,7 @@ interface UseCanvasDraggingResult {
     onUpdate: (planetName: string, simX: number, simY: number, distance: number) => void
   ) => void;
   stopDragging: () => BodyTemplate | null;
+  clearDraggingPlanetName: () => void;
 }
 
 export const useCanvasDragging = (): UseCanvasDraggingResult => {
@@ -73,15 +74,21 @@ export const useCanvasDragging = (): UseCanvasDraggingResult => {
     const finalPlanet = latestDraggedPlanetRef.current;
     setIsDragging(false);
 
-    // Keep draggingPlanetName set for a short period to prevent snap-back
-    // This allows the canvas to continue using the dragged position until simulation updates
-    dragEndTimeoutRef.current = setTimeout(() => {
-      setDraggingPlanetName(null);
-      dragEndTimeoutRef.current = null;
-    }, 100); // Short delay to bridge the gap until new simulation data arrives
+    // Don't automatically clear draggingPlanetName here - keep planet at dragged position
+    // until new simulation data arrives. This prevents snap-back behavior.
+    // The caller is responsible for clearing draggingPlanetName when simulation completes.
 
     return finalPlanet;
   }, [isDragging]);
+
+  const clearDraggingPlanetName = useCallback(() => {
+    // Clear any pending timeout
+    if (dragEndTimeoutRef.current) {
+      clearTimeout(dragEndTimeoutRef.current);
+      dragEndTimeoutRef.current = null;
+    }
+    setDraggingPlanetName(null);
+  }, []);
 
   return {
     isDragging,
@@ -90,5 +97,6 @@ export const useCanvasDragging = (): UseCanvasDraggingResult => {
     handleCanvasMouseDown,
     handleCanvasMouseMove,
     stopDragging,
+    clearDraggingPlanetName,
   };
 };

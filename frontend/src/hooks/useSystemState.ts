@@ -40,6 +40,7 @@ interface UseAutoSimulationOptions {
   runSimulation: (payload: any, requestId: number) => Promise<void>;
   computeRequestRef: React.MutableRefObject<number>;
   playStartRef: React.MutableRefObject<number | null>;
+  clearDraggingPlanetName: () => void;
 }
 
 export const useAutoSimulation = ({
@@ -49,6 +50,7 @@ export const useAutoSimulation = ({
   runSimulation,
   computeRequestRef,
   playStartRef,
+  clearDraggingPlanetName,
 }: UseAutoSimulationOptions) => {
   const lastSimKeyRef = useRef<string>("");
 
@@ -67,6 +69,11 @@ export const useAutoSimulation = ({
     if (simKey === lastSimKeyRef.current) return;
     lastSimKeyRef.current = simKey;
 
-    runSimulation(buildSimulationPayload(), ++computeRequestRef.current);
-  }, [planets, buildSimulationPayload, runSimulation, isDragging]);
+    // Run simulation and clear dragging planet name when it completes
+    runSimulation(buildSimulationPayload(), ++computeRequestRef.current).then(() => {
+      // Clear the dragging planet name after simulation completes
+      // This allows the planet to stay at the dragged position until new data arrives
+      clearDraggingPlanetName();
+    });
+  }, [planets, buildSimulationPayload, runSimulation, isDragging, clearDraggingPlanetName]);
 };
